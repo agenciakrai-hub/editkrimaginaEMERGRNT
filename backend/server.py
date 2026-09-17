@@ -37,13 +37,17 @@ app = FastAPI(title="Watchful API")
 api = APIRouter(prefix="/api")
 
 FREE_CREDITS = 30
-OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "krimagina@gmail.com").lower().strip()
+OWNER_EMAILS = {
+    e.strip().lower()
+    for e in os.environ.get("OWNER_EMAIL", "krimagina2025@gmail.com,krimagina@gmail.com").split(",")
+    if e.strip()
+}
 
 
 def is_owner(user: dict) -> bool:
     if not user:
         return False
-    return user.get("role") == "owner" or (user.get("email", "").lower() == OWNER_EMAIL)
+    return user.get("role") == "owner" or (user.get("email", "").lower() in OWNER_EMAILS)
 COOKIE_KW = dict(httponly=True, secure=True, samesite="none", path="/")
 
 
@@ -529,6 +533,7 @@ def _video_public(v: dict) -> dict:
         "status": v.get("status", "processing"),
         "storage_path": v.get("storage_path"),
         "photo_count": v.get("photo_count", 0),
+        "eta_seconds": v.get("eta_seconds"),
         "created_at": v.get("created_at"),
     }
 
@@ -585,6 +590,8 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
         await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": -cost}})
 
     storage_paths = [p.get("current_path") or p["original_path"] for p in photos]
+    per = 4 if fmt == "tour" else 3
+    eta_seconds = 8 + per * len(storage_paths)
     video_doc = {
         "id": str(uuid.uuid4()),
         "user_id": user["user_id"],
@@ -593,12 +600,13 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
         "status": "processing",
         "cost": cost,
         "photo_count": len(storage_paths),
+        "eta_seconds": eta_seconds,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.videos.insert_one(video_doc)
     subtitle = data.agency_name or prop.get("address") or ""
     asyncio.create_task(_process_video(video_doc["id"], user["user_id"], storage_paths, fmt, prop["name"], subtitle, data.music, cost))
-    return {"video_id": video_doc["id"], "cost": cost}
+    return {"video_id": video_doc["id"], "cost": cost, "eta_seconds": eta_seconds}
 
 
 @api.get("/properties/{property_id}/videos")
@@ -811,10 +819,10 @@ async def startup():
     elif not auth_utils.verify_password(admin_password, existing.get("password_hash", "")):
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": auth_utils.hash_password(admin_password)}})
 
-    # Promote the app owner (unlimited, non-consuming credits) if the account already exists.
-    if OWNER_EMAIL:
-        await db.users.update_one(
-            {"email": OWNER_EMAIL},
+    # Promote the app owner(s) (unlimited, non-consuming credits) if the account already exists.
+    if OWNER_EMAILS:
+        await db.users.update_many(
+            {"email": {"$in": list(OWNER_EMAILS)}},
             {"$set": {"role": "owner", "credits": 999999}},
         )
 

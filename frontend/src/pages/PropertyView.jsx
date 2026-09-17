@@ -4,6 +4,7 @@ import { api, apiError, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import AuthImage from "@/components/AuthImage";
+import VideoTimer from "@/components/VideoTimer";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -309,9 +310,9 @@ export default function PropertyView() {
                 <div key={v.id} data-testid={`video-card-${v.id}`}
                   className="rounded-xl border border-white/5 bg-[#15131C] overflow-hidden">
                   {v.status === "processing" ? (
-                    <div className="aspect-video flex flex-col items-center justify-center gap-2 bg-black/40">
+                    <div className="aspect-video flex flex-col items-center justify-center gap-3 bg-black/40">
                       <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
-                      <span className="text-xs text-slate-400">Generando video…</span>
+                      <VideoTimer createdAt={v.created_at} etaSeconds={v.eta_seconds || 40} />
                     </div>
                   ) : v.status === "failed" ? (
                     <div className="aspect-video flex items-center justify-center bg-black/40 text-sm text-red-400">Falló · créditos reembolsados</div>
