@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import Logo from "@/components/Logo";
-import { Zap, LogOut, LayoutGrid } from "lucide-react";
+import BuyCreditsDialog from "@/components/BuyCreditsDialog";
+import { Zap, LogOut, LayoutGrid, Plus } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,8 +16,10 @@ import {
 export default function Header({ actions }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [buyOpen, setBuyOpen] = useState(false);
 
   return (
+    <>
     <header className="sticky top-0 z-40 backdrop-blur-xl bg-[#15131C]/80 border-b border-white/5">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
         <Link to="/app" data-testid="header-logo" className="flex items-center">
@@ -27,17 +30,19 @@ export default function Header({ actions }) {
           {actions}
           {user && (
             <>
-              <div
+              <button
+                onClick={() => setBuyOpen(true)}
                 data-testid="credit-counter"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-violet-500/40 bg-violet-500/10 shadow-[0_0_16px_rgba(139,92,246,0.25)]"
-                title="Créditos disponibles"
+                title="Comprar créditos"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-violet-500/40 bg-violet-500/10 shadow-[0_0_16px_rgba(139,92,246,0.25)] hover:bg-violet-500/20 transition-colors"
               >
                 <Zap className="w-4 h-4 text-cyan-400 fill-cyan-400" />
                 <span className="text-sm font-semibold text-white tabular-nums" data-testid="credit-amount">
                   {user.credits}
                 </span>
                 <span className="hidden sm:inline text-xs text-slate-400">créditos</span>
-              </div>
+                <Plus className="w-3.5 h-3.5 text-cyan-300 ml-0.5" />
+              </button>
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -79,5 +84,7 @@ export default function Header({ actions }) {
         </div>
       </div>
     </header>
+    <BuyCreditsDialog open={buyOpen} onOpenChange={setBuyOpen} />
+    </>
   );
 }

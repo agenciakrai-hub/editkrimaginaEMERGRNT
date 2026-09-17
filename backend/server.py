@@ -19,6 +19,11 @@ from pydantic import BaseModel, EmailStr, Field
 import auth as auth_utils
 import storage
 import ai_edit
+import video as video_gen
+import payments as pay
+import stripe
+import tempfile
+import shutil
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -66,6 +71,21 @@ class BatchInput(BaseModel):
     options: Optional[dict] = None
     disclosure: Optional[bool] = None
     photo_ids: Optional[List[str]] = None
+
+
+class VideoInput(BaseModel):
+    format: str = "tour"  # tour | reel
+    photo_ids: Optional[List[str]] = None
+    music: bool = True
+    agency_name: Optional[str] = None
+
+
+class CheckoutInput(BaseModel):
+    lookup_key: str
+    origin_url: str
+
+
+VIDEO_COSTS = {"tour": 12, "reel": 8}
 
 
 # ---------- Auth dependency ----------
@@ -473,10 +493,213 @@ async def serve_file(path: str, request: Request, token: str = Query(None)):
     if not user:
         raise HTTPException(status_code=401, detail="No autenticado")
     record = await db.photos.find_one({"$or": [{"original_path": path}, {"current_path": path}], "user_id": user["user_id"]})
+    if record:
+        data, content_type = storage.get_object(path)
+        return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=3600"})
+    vid = await db.videos.find_one({"storage_path": path, "user_id": user["user_id"]})
+    if vid:
+        data, content_type = storage.get_object(path)
+        return Response(content=data, media_type="video/mp4", headers={"Cache-Control": "private, max-age=3600"})
+    raise HTTPException(status_code=404, detail="Archivo no encontrado")
+
+
+# ---------- Videos ----------
+def _video_public(v: dict) -> dict:
+    return {
+        "id": v["id"],
+        "property_id": v["property_id"],
+        "format": v.get("format", "tour"),
+        "status": v.get("status", "processing"),
+        "storage_path": v.get("storage_path"),
+        "photo_count": v.get("photo_count", 0),
+        "created_at": v.get("created_at"),
+    }
+
+
+async def _process_video(video_id, user_id, storage_paths, fmt, title, subtitle, music, cost):
+    tmpdir = tempfile.mkdtemp()
+    try:
+        local = []
+        for i, p in enumerate(storage_paths):
+            data, _ = storage.get_object(p)
+            fp = os.path.join(tmpdir, f"src{i}.jpg")
+            with open(fp, "wb") as fh:
+                fh.write(data)
+            local.append(fp)
+        out = os.path.join(tmpdir, "out.mp4")
+        await video_gen.generate_video(local, out, fmt=fmt, title=title, subtitle=subtitle, music=music)
+        with open(out, "rb") as fh:
+            vbytes = fh.read()
+        path = f"{storage.APP_NAME}/videos/{user_id}/{uuid.uuid4()}.mp4"
+        stored = storage.put_object(path, vbytes, "video/mp4")
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {"status": "done", "storage_path": stored["path"],
+                      "finished_at": datetime.now(timezone.utc).isoformat()}},
+        )
+    except Exception:
+        logger.exception("video generation failed")
+        if cost > 0:
+            await db.users.update_one({"user_id": user_id}, {"$inc": {"credits": cost}})
+        await db.videos.update_one({"id": video_id}, {"$set": {"status": "failed"}})
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@api.post("/properties/{property_id}/video")
+async def create_video(property_id: str, data: VideoInput, user: dict = Depends(current_user)):
+    fmt = data.format if data.format in VIDEO_COSTS else "tour"
+    prop = await db.properties.find_one({"id": property_id, "user_id": user["user_id"]})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+
+    query = {"property_id": property_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}
+    if data.photo_ids:
+        query["id"] = {"$in": data.photo_ids}
+    photos = await db.photos.find(query, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    if not photos:
+        raise HTTPException(status_code=400, detail="No hay fotos para el video")
+
+    cost = VIDEO_COSTS[fmt]
+    fresh = await db.users.find_one({"user_id": user["user_id"]})
+    if fresh.get("credits", 0) < cost:
+        raise HTTPException(status_code=402, detail=f"Necesitas {cost} créditos para generar este video")
+    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": -cost}})
+
+    storage_paths = [p.get("current_path") or p["original_path"] for p in photos]
+    video_doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["user_id"],
+        "property_id": property_id,
+        "format": fmt,
+        "status": "processing",
+        "photo_count": len(storage_paths),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.videos.insert_one(video_doc)
+    subtitle = data.agency_name or prop.get("address") or ""
+    asyncio.create_task(_process_video(video_doc["id"], user["user_id"], storage_paths, fmt, prop["name"], subtitle, data.music, cost))
+    return {"video_id": video_doc["id"], "cost": cost}
+
+
+@api.get("/properties/{property_id}/videos")
+async def list_videos(property_id: str, user: dict = Depends(current_user)):
+    prop = await db.properties.find_one({"id": property_id, "user_id": user["user_id"]})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+    vids = await db.videos.find({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return [_video_public(v) for v in vids]
+
+
+@api.get("/videos/{video_id}")
+async def get_video(video_id: str, user: dict = Depends(current_user)):
+    v = await db.videos.find_one({"id": video_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Video no encontrado")
+    return _video_public(v)
+
+
+# ---------- Payments (Stripe credit packages) ----------
+@api.get("/payments/packages")
+async def payment_packages():
+    return [{"lookup_key": k, **v} for k, v in pay.PACKAGES.items()]
+
+
+@api.post("/payments/checkout")
+async def payment_checkout(data: CheckoutInput, user: dict = Depends(current_user)):
+    if data.lookup_key not in pay.PACKAGES:
+        raise HTTPException(status_code=400, detail="Paquete no válido")
+    prices = stripe.Price.list(lookup_keys=[data.lookup_key], active=True, limit=1).data
+    if not prices:
+        raise HTTPException(status_code=500, detail="Precio no encontrado")
+    price = prices[0]
+    kwargs = dict(
+        line_items=[{"price": price.id, "quantity": 1}],
+        mode="payment",
+        success_url=f"{data.origin_url}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{data.origin_url}/payment/cancel",
+        metadata={"user_id": user["user_id"], "lookup_key": data.lookup_key},
+    )
+    try:
+        session = stripe.checkout.Session.create(**kwargs, managed_payments={"enabled": True})
+    except stripe.error.InvalidRequestError as e:
+        msg = (getattr(e, "user_message", "") or "").lower()
+        if "managed payments" in msg or "ineligible" in msg:
+            session = stripe.checkout.Session.create(**kwargs, automatic_tax={"enabled": True}, billing_address_collection="required")
+        else:
+            raise
+    await db.payment_transactions.insert_one({
+        "session_id": session.id,
+        "user_id": user["user_id"],
+        "lookup_key": data.lookup_key,
+        "credits": pay.PACKAGES[data.lookup_key]["credits"],
+        "amount": (price.unit_amount or 0),
+        "currency": price.currency,
+        "status": "initiated",
+        "payment_status": "pending",
+        "credited": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"checkout_url": session.url, "session_id": session.id}
+
+
+@api.get("/payments/status/{session_id}")
+async def payment_status(session_id: str):
+    record = await db.payment_transactions.find_one({"session_id": session_id})
     if not record:
-        raise HTTPException(status_code=404, detail="Archivo no encontrado")
-    data, content_type = storage.get_object(path)
-    return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=3600"})
+        raise HTTPException(status_code=404, detail="Transacción no encontrada")
+    if record.get("payment_status") != "paid":
+        try:
+            s = stripe.checkout.Session.retrieve(session_id)
+            if s.payment_status == "paid" or s.status == "complete":
+                await db.payment_transactions.update_one(
+                    {"session_id": session_id, "payment_status": {"$ne": "paid"}},
+                    {"$set": {"status": "completed", "payment_status": "paid",
+                              "stripe_payment_intent_id": s.payment_intent,
+                              "updated_at": datetime.now(timezone.utc).isoformat()}},
+                )
+                await pay.grant_credits(db, session_id)
+                record = await db.payment_transactions.find_one({"session_id": session_id})
+        except stripe.error.StripeError:
+            pass
+    return {
+        "session_id": record["session_id"],
+        "status": record["status"],
+        "payment_status": record["payment_status"],
+        "credits": record.get("credits"),
+    }
+
+
+@api.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig, pay.STRIPE_WEBHOOK_SECRET)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Firma inválida")
+    obj, t = event["data"]["object"], event["type"]
+    if t == "checkout.session.completed":
+        await db.payment_transactions.update_one(
+            {"session_id": obj["id"], "payment_status": {"$ne": "paid"}},
+            {"$set": {"status": "completed", "payment_status": obj.get("payment_status", "paid"),
+                      "stripe_payment_intent_id": obj.get("payment_intent"),
+                      "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        await pay.grant_credits(db, obj["id"])
+    elif t == "checkout.session.async_payment_succeeded":
+        await db.payment_transactions.update_one(
+            {"session_id": obj["id"]},
+            {"$set": {"payment_status": "paid", "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        await pay.grant_credits(db, obj["id"])
+    elif t in ("checkout.session.async_payment_failed", "checkout.session.expired"):
+        await db.payment_transactions.update_one(
+            {"session_id": obj["id"]},
+            {"$set": {"status": "failed", "payment_status": "failed", "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+    return {"status": "ok"}
 
 
 @api.get("/")

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { api, apiError } from "@/lib/api";
+import { api, apiError, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import AuthImage from "@/components/AuthImage";
@@ -8,12 +8,16 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
 import {
   Upload, Loader2, ChevronRight, Trash2, Wand2, Zap, ImageOff, Layers, ShieldCheck, CheckCircle2,
+  Film, Music, Clapperboard, Download, Smartphone, Monitor,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -31,6 +35,13 @@ export default function PropertyView() {
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchAction, setBatchAction] = useState("");
   const [job, setJob] = useState(null);
+
+  const [videos, setVideos] = useState([]);
+  const [videoOpen, setVideoOpen] = useState(false);
+  const [videoFormat, setVideoFormat] = useState("tour");
+  const [music, setMusic] = useState(true);
+  const [agencyName, setAgencyName] = useState("");
+  const VIDEO_COSTS = { tour: 12, reel: 8 };
 
   const load = useCallback(async () => {
     try {
@@ -50,8 +61,36 @@ export default function PropertyView() {
 
   useEffect(() => {
     load();
+    loadVideos();
     api.get("/actions").then(({ data }) => setActions(data)).catch(() => {});
   }, [load]);
+
+  const loadVideos = useCallback(async () => {
+    try {
+      const { data } = await api.get(`/properties/${id}/videos`);
+      setVideos(data);
+      if (data.some((v) => v.status === "processing")) {
+        setTimeout(loadVideos, 4000);
+      }
+    } catch {}
+  }, [id]);
+
+  const generateVideo = async () => {
+    try {
+      const { data } = await api.post(`/properties/${id}/video`, {
+        format: videoFormat,
+        music,
+        agency_name: agencyName || undefined,
+      });
+      setVideoOpen(false);
+      toast.success("Generando video… te avisaremos al terminar");
+      const me = await api.get("/auth/me");
+      updateCredits(me.data.credits);
+      loadVideos();
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
 
   const handleFiles = async (files) => {
     if (!files?.length) return;
@@ -141,10 +180,14 @@ export default function PropertyView() {
             <h1 className="font-display text-3xl font-bold text-white">{prop?.name}</h1>
             {prop?.address && <p className="text-slate-400 mt-1">{prop.address}</p>}
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <Button onClick={() => setBatchOpen(true)} disabled={!photos.length} data-testid="batch-edit-btn"
               variant="outline" className="rounded-full border-white/15 bg-white/5 hover:bg-white/10 text-white">
               <Layers className="w-4 h-4 mr-1.5" /> Editar por lote
+            </Button>
+            <Button onClick={() => setVideoOpen(true)} disabled={!photos.length} data-testid="video-btn"
+              variant="outline" className="rounded-full border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200">
+              <Clapperboard className="w-4 h-4 mr-1.5" /> Generar video
             </Button>
             <Button onClick={() => fileRef.current?.click()} disabled={uploading} data-testid="upload-btn"
               className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
@@ -213,6 +256,46 @@ export default function PropertyView() {
             ))}
           </div>
         )}
+
+        {/* Videos section */}
+        {videos.length > 0 && (
+          <div className="mt-12" data-testid="videos-section">
+            <h2 className="font-display text-xl font-semibold text-white mb-4 flex items-center gap-2">
+              <Film className="w-5 h-5 text-cyan-400" /> Videos de la propiedad
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {videos.map((v) => (
+                <div key={v.id} data-testid={`video-card-${v.id}`}
+                  className="rounded-xl border border-white/5 bg-[#15131C] overflow-hidden">
+                  {v.status === "processing" ? (
+                    <div className="aspect-video flex flex-col items-center justify-center gap-2 bg-black/40">
+                      <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+                      <span className="text-xs text-slate-400">Generando video…</span>
+                    </div>
+                  ) : v.status === "failed" ? (
+                    <div className="aspect-video flex items-center justify-center bg-black/40 text-sm text-red-400">Falló · créditos reembolsados</div>
+                  ) : (
+                    <video src={fileUrl(v.storage_path)} controls playsInline
+                      className={v.format === "reel" ? "w-full max-h-[420px] bg-black object-contain" : "w-full aspect-video bg-black object-contain"} />
+                  )}
+                  <div className="p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm text-white">
+                      {v.format === "reel" ? <Smartphone className="w-4 h-4 text-violet-400" /> : <Monitor className="w-4 h-4 text-cyan-400" />}
+                      {v.format === "reel" ? "Reel vertical" : "Video-tour"}
+                      <span className="text-xs text-slate-500">· {v.photo_count} fotos</span>
+                    </div>
+                    {v.status === "done" && (
+                      <a href={fileUrl(v.storage_path)} download data-testid={`video-download-${v.id}`}
+                        className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 flex items-center justify-center transition-colors">
+                        <Download className="w-4 h-4 text-white" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Batch dialog */}
@@ -247,6 +330,52 @@ export default function PropertyView() {
             <Button onClick={startBatch} disabled={!batchAction} data-testid="batch-confirm"
               className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
               Aplicar a {photos.length} fotos
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Video dialog */}
+      <Dialog open={videoOpen} onOpenChange={setVideoOpen}>
+        <DialogContent className="bg-[#1E1A29] border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2"><Clapperboard className="w-5 h-5 text-cyan-400" /> Generar video</DialogTitle>
+            <DialogDescription className="text-slate-400">Crea un video a partir de las {photos.length} fotos de esta propiedad.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setVideoFormat("tour")} data-testid="video-format-tour"
+                className={`rounded-xl border p-4 text-left transition-colors ${videoFormat === "tour" ? "border-cyan-500/60 bg-cyan-500/10" : "border-white/10 bg-black/20 hover:border-white/20"}`}>
+                <Monitor className={`w-5 h-5 mb-2 ${videoFormat === "tour" ? "text-cyan-400" : "text-slate-400"}`} />
+                <div className="text-sm font-medium text-white">Video-tour</div>
+                <div className="text-xs text-slate-400">Horizontal 16:9 · web y portales</div>
+                <div className="text-xs text-cyan-300 mt-1 flex items-center gap-1"><Zap className="w-3 h-3" />{VIDEO_COSTS.tour} créditos</div>
+              </button>
+              <button onClick={() => setVideoFormat("reel")} data-testid="video-format-reel"
+                className={`rounded-xl border p-4 text-left transition-colors ${videoFormat === "reel" ? "border-violet-500/60 bg-violet-500/10" : "border-white/10 bg-black/20 hover:border-white/20"}`}>
+                <Smartphone className={`w-5 h-5 mb-2 ${videoFormat === "reel" ? "text-violet-400" : "text-slate-400"}`} />
+                <div className="text-sm font-medium text-white">Reel vertical</div>
+                <div className="text-xs text-slate-400">9:16 · Instagram y TikTok</div>
+                <div className="text-xs text-violet-300 mt-1 flex items-center gap-1"><Zap className="w-3 h-3" />{VIDEO_COSTS.reel} créditos</div>
+              </button>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-300 text-sm">Nombre de la agencia (portada, opcional)</Label>
+              <Input value={agencyName} onChange={(e) => setAgencyName(e.target.value)} data-testid="video-agency-input"
+                placeholder="Tu Agencia Inmobiliaria" className="bg-secondary/60 border-white/10" />
+            </div>
+            <div className="flex items-center justify-between rounded-xl bg-black/30 border border-white/10 p-3">
+              <div className="flex items-center gap-2">
+                <Music className="w-4 h-4 text-cyan-400" />
+                <span className="text-sm text-slate-300">Música de fondo</span>
+              </div>
+              <Switch checked={music} onCheckedChange={setMusic} data-testid="video-music-toggle" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={generateVideo} data-testid="video-confirm"
+              className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
+              Generar · {VIDEO_COSTS[videoFormat]} créditos
             </Button>
           </DialogFooter>
         </DialogContent>
