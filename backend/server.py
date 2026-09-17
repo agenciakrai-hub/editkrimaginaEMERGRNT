@@ -19,6 +19,7 @@ from pydantic import BaseModel, EmailStr, Field
 import auth as auth_utils
 import storage
 import ai_edit
+import imaging
 import video as video_gen
 import payments as pay
 import stripe
@@ -294,13 +295,21 @@ async def upload_photos(property_id: str, files: List[UploadFile] = File(...), u
     created = []
     for f in files:
         ext = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "jpg").lower()
-        if ext not in storage.MIME_TYPES:
-            raise HTTPException(status_code=400, detail=f"Formato no soportado: .{ext}. Usa JPG, PNG o WEBP.")
+        if not imaging.is_supported_input(ext):
+            raise HTTPException(status_code=400, detail=f"Formato no soportado: .{ext}. Usa JPG, PNG, WEBP, HEIC o RAW.")
         data = await f.read()
-        if len(data) > 25 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail=f"{f.filename} supera el límite de 25MB")
+        if len(data) > 60 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail=f"{f.filename} supera el límite de 60MB")
+        original_filename = f.filename
+        if imaging.needs_conversion(ext):
+            try:
+                data = imaging.convert_to_jpeg(data, ext)
+            except Exception as e:
+                logger.exception("conversion failed")
+                raise HTTPException(status_code=400, detail=f"No se pudo convertir {f.filename}: {e}")
+            ext = "jpg"
+        content_type = storage.MIME_TYPES.get(ext, "image/jpeg")
         path = f"{storage.APP_NAME}/uploads/{user['user_id']}/{uuid.uuid4()}.{ext}"
-        content_type = storage.MIME_TYPES[ext]
         result = storage.put_object(path, data, content_type)
         photo = {
             "id": str(uuid.uuid4()),
@@ -309,7 +318,7 @@ async def upload_photos(property_id: str, files: List[UploadFile] = File(...), u
             "original_path": result["path"],
             "current_path": result["path"],
             "content_type": content_type,
-            "original_filename": f.filename,
+            "original_filename": original_filename,
             "status": "ready",
             "disclosure": False,
             "edits": [],
@@ -709,13 +718,24 @@ async def root():
 
 app.include_router(api)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=[os.environ.get("FRONTEND_URL", "http://localhost:3000")],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors = os.environ.get("CORS_ORIGINS", "*").strip()
+if _cors == "*":
+    # Reflect any origin so preview, production and custom domains all work with cookie credentials.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_credentials=True,
+        allow_origin_regex=".*",
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_credentials=True,
+        allow_origins=[o.strip() for o in _cors.split(",") if o.strip()],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.on_event("startup")

@@ -44,6 +44,15 @@ Plataforma web/PWA en español para que agentes, agencias y fotógrafos inmobili
 - [x] Landing marketing, dashboard, property view, editor full-screen — 2026-06
 - Testing: backend 16/16 pytest, frontend flujo crítico 100% (iteration_1).
 
+## Iteración 2 (2026-06)
+- [x] Video-tour 16:9 y Reel vertical 9:16 desde fotos (ffmpeg: Ken Burns, fundidos, música ambiente, portada con nombre de agencia); costes tour=12/reel=8 créditos, reembolso si falla
+- [x] Compra de créditos con Stripe (paquetes 100/300/1.000 €) — checkout + status + webhook idempotente; sandbox Flow A (ES, tax full)
+- [x] Mejora automática: acción "auto" gratis en un clic (una pasada de IA con todas las mejoras esenciales); también disponible en modo lote
+- [x] Subida robusta: cada foto en su propia petición + optimización en navegador (máx 2560px) → soluciona error 413
+- [x] Conversión HEIC/HEIF y RAW en el servidor (pillow-heif + rawpy) a JPEG optimizado; límite 60MB/archivo
+- [x] CORS listo para producción (refleja cualquier origen con credenciales) — deployment check PASS
+- Testing iteración 2: backend 10/10 pytest, frontend video+pagos OK (iteration_2). HEIC verificado por conversión e2e.
+
 ## Backlog priorizado
 ### P0 (próximo)
 - Video-tour automático (Ken Burns + transiciones + música) y reel vertical desde fotos aprobadas.

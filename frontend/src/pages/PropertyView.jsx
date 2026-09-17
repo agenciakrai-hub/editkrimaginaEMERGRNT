@@ -235,7 +235,7 @@ export default function PropertyView() {
               {uploading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Upload className="w-4 h-4 mr-1.5" />}
               Subir fotos
             </Button>
-            <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden
+            <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif,.cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef,.srw,.sr2" multiple hidden
               data-testid="file-input" onChange={(e) => handleFiles(e.target.files)} />
           </div>
         </div>
@@ -266,7 +266,7 @@ export default function PropertyView() {
               <Upload className="w-7 h-7 text-cyan-400" />
             </div>
             <h3 className="font-display text-xl font-medium text-white">Sube las fotos del inmueble</h3>
-            <p className="text-slate-400 mt-2">Arrastra aquí o haz clic · JPG, PNG o WEBP (máx. 25MB)</p>
+            <p className="text-slate-400 mt-2">Arrastra aquí o haz clic · JPG, PNG, WEBP, HEIC o RAW · se optimizan automáticamente</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4" data-testid="photos-grid">

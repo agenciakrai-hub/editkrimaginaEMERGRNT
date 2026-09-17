@@ -44,6 +44,7 @@ httplib2==0.32.0
 httpx==0.28.1
 huggingface_hub==1.31.0
 idna==3.19
+ImageIO==2.37.4
 importlib_metadata==9.0.1
 iniconfig==2.3.0
 isort==9.0.1
@@ -71,6 +72,7 @@ pandas==3.0.5
 passlib==1.7.4
 pathspec==1.1.1
 pillow==12.3.0
+pillow_heif==1.7.0
 platformdirs==4.11.8
 pluggy==1.6.0
 propcache==0.5.4
@@ -95,6 +97,7 @@ python-jose==3.5.0
 python-multipart==0.0.32
 pytokens==0.4.1
 PyYAML==6.0.3
+rawpy==0.27.1
 referencing==0.37.0
 regex==2026.9.10
 requests==2.34.2
