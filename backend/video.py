@@ -6,9 +6,17 @@ import logging
 
 logger = logging.getLogger("watchful.video")
 
+try:
+    import imageio_ffmpeg
+    FFMPEG_BIN = imageio_ffmpeg.get_ffmpeg_exe()
+except Exception as e:  # noqa
+    FFMPEG_BIN = "ffmpeg"
+    logger.warning("imageio-ffmpeg not available, falling back to system ffmpeg: %s", e)
+
 FONT_CANDIDATES = [
+    os.path.join(os.path.dirname(__file__), "assets", "font.ttf"),
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
 ]
 
 
@@ -26,6 +34,8 @@ FORMATS = {
 
 
 async def _run(args):
+    if args and args[0] == "ffmpeg":
+        args = [FFMPEG_BIN] + list(args[1:])
     proc = await asyncio.create_subprocess_exec(
         *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
@@ -39,11 +49,10 @@ def _esc(text: str) -> str:
     return (text or "").replace("\\", "").replace(":", " ").replace("'", "").replace("%", "")[:60]
 
 
-async def _make_clip(img_path, out_path, w, h, secs, idx, title=None, subtitle=None):
+async def _make_clip(img_path, out_path, w, h, secs, idx):
     bw, bh = int(w * 2), int(h * 2)
     frames = int(secs * 30)
     zoom_end = 1.18
-    # alternate pan for variety
     x_expr = "iw/2-(iw/zoom/2)" if idx % 2 == 0 else "(iw-iw/zoom)*(on/{})".format(frames)
     vf = (
         f"scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
@@ -51,19 +60,6 @@ async def _make_clip(img_path, out_path, w, h, secs, idx, title=None, subtitle=N
         f"y='ih/2-(ih/zoom/2)':s={w}x{h}:fps=30,setsar=1,"
         f"fade=t=in:st=0:d=0.4,fade=t=out:st={secs-0.4:.2f}:d=0.4,format=yuv420p"
     )
-    font = _font()
-    if font and (title or subtitle):
-        if title:
-            vf += (
-                f",drawtext=fontfile={font}:text='{_esc(title)}':fontcolor=white:fontsize={int(h*0.05)}:"
-                f"x=(w-text_w)/2:y=h-{int(h*0.16)}:box=1:boxcolor=black@0.45:boxborderw=20:"
-                f"enable='between(t,0.4,{secs})'"
-            )
-        if subtitle:
-            vf += (
-                f",drawtext=fontfile={font}:text='{_esc(subtitle)}':fontcolor=white@0.85:fontsize={int(h*0.03)}:"
-                f"x=(w-text_w)/2:y=h-{int(h*0.09)}:enable='between(t,0.4,{secs})'"
-            )
     await _run([
         "ffmpeg", "-y", "-loop", "1", "-i", img_path,
         "-vf", vf, "-t", f"{secs}", "-r", "30",
@@ -72,25 +68,42 @@ async def _make_clip(img_path, out_path, w, h, secs, idx, title=None, subtitle=N
     ])
 
 
-async def _make_title_card(out_path, w, h, secs, title, subtitle):
-    font = _font()
-    frames_dur = secs
-    inputs = f"color=c=0x0B0A10:s={w}x{h}:d={frames_dur}:r=30"
-    vf = "format=yuv420p,fade=t=in:st=0:d=0.4,fade=t=out:st={:.2f}:d=0.5".format(secs - 0.5)
-    if font:
-        vf = (
-            f"drawtext=fontfile={font}:text='{_esc(title)}':fontcolor=white:fontsize={int(h*0.07)}:"
-            f"x=(w-text_w)/2:y=(h-text_h)/2-{int(h*0.02)}:enable='between(t,0.3,{secs})',"
-        )
+def _render_title_png(png_path, w, h, title, subtitle):
+    """Render the branded title card with Pillow (the bundled ffmpeg lacks drawtext)."""
+    from PIL import Image, ImageDraw, ImageFont
+    img = Image.new("RGB", (w, h), (11, 10, 16))
+    d = ImageDraw.Draw(img)
+    font_path = _font()
+    title = (title or "Watchful")[:44]
+    if font_path:
+        tf = ImageFont.truetype(font_path, int(h * 0.075))
+        tb = d.textbbox((0, 0), title, font=tf)
+        tw, th = tb[2] - tb[0], tb[3] - tb[1]
+        ty = h / 2 - th
+        d.text(((w - tw) / 2, ty), title, font=tf, fill=(255, 255, 255))
+        line_y = ty + th + int(h * 0.035)
+        d.rectangle([w / 2 - 46, line_y, w / 2 + 46, line_y + 4], fill=(6, 182, 212))
         if subtitle:
-            vf += (
-                f"drawtext=fontfile={font}:text='{_esc(subtitle)}':fontcolor=0x06B6D4:fontsize={int(h*0.035)}:"
-                f"x=(w-text_w)/2:y=(h/2)+{int(h*0.05)}:enable='between(t,0.3,{secs})',"
-            )
-        vf += f"format=yuv420p,fade=t=in:st=0:d=0.4,fade=t=out:st={secs-0.5:.2f}:d=0.5"
+            sub = subtitle[:60]
+            sf = ImageFont.truetype(font_path, int(h * 0.033))
+            sbb = d.textbbox((0, 0), sub, font=sf)
+            sw = sbb[2] - sbb[0]
+            d.text(((w - sw) / 2, line_y + int(h * 0.03)), sub, font=sf, fill=(6, 182, 212))
+    img.save(png_path, "PNG")
+
+
+async def _make_title_card(out_path, w, h, secs, title, subtitle):
+    png = out_path + ".png"
+    await asyncio.to_thread(_render_title_png, png, w, h, title, subtitle)
+    frames = int(secs * 30)
+    vf = (
+        f"scale={w}:{h},zoompan=z='min(zoom+0.0009,1.08)':d={frames}:"
+        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps=30,setsar=1,"
+        f"fade=t=in:st=0:d=0.5,fade=t=out:st={secs-0.6:.2f}:d=0.6,format=yuv420p"
+    )
     await _run([
-        "ffmpeg", "-y", "-f", "lavfi", "-i", inputs,
-        "-vf", vf, "-t", f"{secs}",
+        "ffmpeg", "-y", "-loop", "1", "-i", png,
+        "-vf", vf, "-t", f"{secs}", "-r", "30",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
         out_path,
     ])
@@ -127,7 +140,7 @@ async def generate_video(img_paths, out_path, fmt="tour", title=None, subtitle=N
 
         for i, p in enumerate(img_paths):
             clip = os.path.join(tmp, f"clip{i}.mp4")
-            await _make_clip(p, clip, w, h, secs, i, title=None, subtitle=None)
+            await _make_clip(p, clip, w, h, secs, i)
             clips.append(clip)
 
         listfile = os.path.join(tmp, "list.txt")

@@ -503,11 +503,11 @@ async def serve_file(path: str, request: Request, token: str = Query(None)):
         raise HTTPException(status_code=401, detail="No autenticado")
     record = await db.photos.find_one({"$or": [{"original_path": path}, {"current_path": path}], "user_id": user["user_id"]})
     if record:
-        data, content_type = storage.get_object(path)
+        data, content_type = await asyncio.to_thread(storage.get_object, path)
         return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=3600"})
     vid = await db.videos.find_one({"storage_path": path, "user_id": user["user_id"]})
     if vid:
-        data, content_type = storage.get_object(path)
+        data, content_type = await asyncio.to_thread(storage.get_object, path)
         return Response(content=data, media_type="video/mp4", headers={"Cache-Control": "private, max-age=3600"})
     raise HTTPException(status_code=404, detail="Archivo no encontrado")
 
@@ -530,7 +530,7 @@ async def _process_video(video_id, user_id, storage_paths, fmt, title, subtitle,
     try:
         local = []
         for i, p in enumerate(storage_paths):
-            data, _ = storage.get_object(p)
+            data, _ = await asyncio.to_thread(storage.get_object, p)
             fp = os.path.join(tmpdir, f"src{i}.jpg")
             with open(fp, "wb") as fh:
                 fh.write(data)
@@ -540,7 +540,7 @@ async def _process_video(video_id, user_id, storage_paths, fmt, title, subtitle,
         with open(out, "rb") as fh:
             vbytes = fh.read()
         path = f"{storage.APP_NAME}/videos/{user_id}/{uuid.uuid4()}.mp4"
-        stored = storage.put_object(path, vbytes, "video/mp4")
+        stored = await asyncio.to_thread(storage.put_object, path, vbytes, "video/mp4")
         await db.videos.update_one(
             {"id": video_id},
             {"$set": {"status": "done", "storage_path": stored["path"],
@@ -582,6 +582,7 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
         "property_id": property_id,
         "format": fmt,
         "status": "processing",
+        "cost": cost,
         "photo_count": len(storage_paths),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -750,6 +751,17 @@ async def startup():
         logger.info("Object storage initialized")
     except Exception as e:
         logger.error("Storage init failed: %s", e)
+
+    # Recover orphaned work from a previous pod: async tasks die on restart/redeploy.
+    orphaned_videos = await db.videos.find({"status": "processing"}, {"_id": 0}).to_list(1000)
+    for v in orphaned_videos:
+        await db.videos.update_one({"id": v["id"], "status": "processing"}, {"$set": {"status": "failed"}})
+        if v.get("cost"):
+            await db.users.update_one({"user_id": v["user_id"]}, {"$inc": {"credits": v["cost"]}})
+    if orphaned_videos:
+        logger.info("Recovered %s orphaned videos", len(orphaned_videos))
+    await db.photos.update_many({"status": "processing"}, {"$set": {"status": "ready"}})
+    await db.jobs.update_many({"status": "processing"}, {"$set": {"status": "done"}})
 
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@watchful.app").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "Watchful2026!")
