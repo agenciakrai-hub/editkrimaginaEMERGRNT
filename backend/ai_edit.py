@@ -10,6 +10,25 @@ MODEL = "gemini-3.1-flash-image-preview"
 # Real-estate AI edit catalogue. cost=0 -> free "esencial". disclosure_default toggles the
 # "Imagen editada digitalmente / Amueblado virtualmente" compliance tag.
 ACTIONS = {
+    "auto": {
+        "label": "Mejora automática",
+        "description": "Aplica todas las mejoras esenciales en un solo clic.",
+        "cost": 0, "category": "auto", "disclosure_default": False,
+        "prompt": (
+            "Act as a professional real estate photo editor and automatically enhance this property photo "
+            "in a single pass, applying ALL of these improvements as appropriate to the scene: "
+            "1) HDR light and color correction — brighten shadows, balance exposure, recover highlights, "
+            "neutral white balance, bright and inviting interiors; "
+            "2) If a dull/grey/overcast sky is visible, replace it with a clear blue sky with soft white clouds and natural sunlight; "
+            "3) Correct perspective and lens distortion so vertical lines (walls, doors, windows) are perfectly straight; "
+            "4) If there is a lawn or garden, make the grass a healthy lush green and tidy the landscaping; "
+            "5) Recover blown-out window views (window pull) so the exterior is visible and balanced; "
+            "6) Remove small distracting clutter (cables, trash, minor mess) without altering the structure or furniture; "
+            "7) Increase overall sharpness, detail and clarity, reduce noise. "
+            "Keep the architecture, layout and all real furniture exactly intact. The result must be photorealistic, "
+            "natural and never over-processed, as a top real estate listing photo."
+        ),
+    },
     "sky": {
         "label": "Reemplazo de cielo",
         "description": "Cielo gris a azul soleado, controlable.",

@@ -14,12 +14,12 @@ import {
 import { motion } from "framer-motion";
 import {
   ArrowLeft, Zap, Loader2, Download, Undo2, ShieldCheck, GitCompareArrows, Image as ImageIcon,
-  Sun, Sparkles, SlidersHorizontal, Moon, Eraser, Trees, PanelTop, Sofa, Maximize,
+  Sun, Sparkles, SlidersHorizontal, Moon, Eraser, Trees, PanelTop, Sofa, Maximize, Wand2,
 } from "lucide-react";
 import { toast } from "sonner";
 
 const ICONS = {
-  sky: Sun, light: Sparkles, straighten: SlidersHorizontal, twilight: Moon,
+  auto: Wand2, sky: Sun, light: Sparkles, straighten: SlidersHorizontal, twilight: Moon,
   declutter: Eraser, lawn: Trees, window_pull: PanelTop, staging: Sofa, upscale: Maximize,
 };
 const STYLES = [
@@ -83,6 +83,21 @@ export default function Editor() {
     }
   };
 
+  const applyAuto = async () => {
+    setProcessing(true);
+    try {
+      const { data } = await api.post(`/photos/${photoId}/edit`, { action: "auto" });
+      setPhoto(data.photo);
+      updateCredits(data.credits);
+      setCompare(true);
+      toast.success("Mejora automática aplicada ✨");
+    } catch (err) {
+      toast.error(apiError(err));
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const revert = async () => {
     try {
       const { data } = await api.post(`/photos/${photoId}/revert`);
@@ -115,7 +130,6 @@ export default function Editor() {
   const hasEdits = photo.edits?.length > 0;
   const esenciales = actions.filter((a) => a.category === "esencial");
   const premium = actions.filter((a) => a.category === "premium");
-
   const ToolButton = ({ a }) => {
     const Icon = ICONS[a.key] || Sparkles;
     return (
@@ -216,6 +230,27 @@ export default function Editor() {
         {/* Tools panel */}
         <aside className="w-full lg:w-80 shrink-0 border-t lg:border-t-0 lg:border-l border-white/5 bg-[#0d0b13] overflow-y-auto max-h-[45vh] lg:max-h-none">
           <div className="p-4 space-y-6">
+            <button
+              onClick={applyAuto}
+              disabled={processing}
+              data-testid="apply-auto-btn"
+              className="group w-full rounded-xl p-[1.5px] bg-gradient-to-r from-violet-600 to-cyan-500 disabled:opacity-50 hover:brightness-110 transition-[filter]"
+            >
+              <div className="rounded-[10px] bg-[#0d0b13] group-hover:bg-[#12101a] transition-colors p-4 flex items-center gap-3 text-left">
+                <div className="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-600 to-cyan-500 flex items-center justify-center">
+                  <Wand2 className="w-5 h-5 text-white" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-display font-semibold text-white">Mejora automática</span>
+                    <span className="text-[10px] font-semibold text-emerald-400">GRATIS</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">Todas las mejoras esenciales en un clic</p>
+                </div>
+                <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+              </div>
+            </button>
+
             <div>
               <h3 className="text-xs uppercase tracking-[0.2em] font-semibold text-violet-400 mb-3">Esenciales · Gratis</h3>
               <div className="space-y-2">
