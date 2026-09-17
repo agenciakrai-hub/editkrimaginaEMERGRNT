@@ -353,7 +353,6 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     stored = storage.put_object(out_path, result_bytes, "image/png")
     action = ai_edit.ACTIONS[action_key]
     disc = action["disclosure_default"] if disclosure is None else disclosure
-    new_disclosure = photo.get("disclosure", False) or (disc and action["disclosure_default"] is not None and disc)
     edit_entry = {"action": action_key, "label": action["label"], "at": datetime.now(timezone.utc).isoformat()}
     await db.photos.update_one(
         {"id": photo["id"]},

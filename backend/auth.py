@@ -44,11 +44,12 @@ def decode_token(token: str):
 
 
 def extract_token(request: Request, query_token: str = None) -> str:
+    # Prefer an explicit Authorization header (avoids account confusion when a
+    # stale cookie is also present), then cookies, then query param (for <img>).
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:]
     token = request.cookies.get("access_token") or request.cookies.get("session_token")
-    if not token:
-        auth = request.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
-            token = auth[7:]
     if not token and query_token:
         token = query_token
     return token
