@@ -33,13 +33,21 @@ FORMATS = {
 }
 
 
-async def _run(args):
+async def _run(args, timeout=180):
     if args and args[0] == "ffmpeg":
         args = [FFMPEG_BIN] + list(args[1:])
     proc = await asyncio.create_subprocess_exec(
         *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
-    _, stderr = await proc.communicate()
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+        raise RuntimeError(f"ffmpeg timeout tras {timeout}s")
     if proc.returncode != 0:
         tail = (stderr or b"").decode(errors="ignore")[-800:]
         raise RuntimeError(f"ffmpeg failed ({proc.returncode}): {tail}")
@@ -50,19 +58,22 @@ def _esc(text: str) -> str:
 
 
 async def _make_clip(img_path, out_path, w, h, secs, idx):
-    bw, bh = int(w * 2), int(h * 2)
-    frames = int(secs * 30)
+    # Keep the working resolution light (1.25x, not 2x) so zoompan is fast and low-memory on
+    # resource-constrained production nodes, while still avoiding upscaling at max zoom (1.18).
+    bw, bh = int(w * 1.25), int(h * 1.25)
+    fps = 25
+    frames = int(secs * fps)
     zoom_end = 1.18
     x_expr = "iw/2-(iw/zoom/2)" if idx % 2 == 0 else "(iw-iw/zoom)*(on/{})".format(frames)
     vf = (
         f"scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
         f"zoompan=z='min(zoom+0.0018,{zoom_end})':d={frames}:x='{x_expr}':"
-        f"y='ih/2-(ih/zoom/2)':s={w}x{h}:fps=30,setsar=1,"
+        f"y='ih/2-(ih/zoom/2)':s={w}x{h}:fps={fps},setsar=1,"
         f"fade=t=in:st=0:d=0.4,fade=t=out:st={secs-0.4:.2f}:d=0.4,format=yuv420p"
     )
     await _run([
         "ffmpeg", "-y", "-loop", "1", "-i", img_path,
-        "-vf", vf, "-t", f"{secs}", "-r", "30",
+        "-vf", vf, "-t", f"{secs}", "-r", f"{fps}",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
         out_path,
     ])
@@ -95,15 +106,16 @@ def _render_title_png(png_path, w, h, title, subtitle):
 async def _make_title_card(out_path, w, h, secs, title, subtitle):
     png = out_path + ".png"
     await asyncio.to_thread(_render_title_png, png, w, h, title, subtitle)
-    frames = int(secs * 30)
+    fps = 25
+    frames = int(secs * fps)
     vf = (
         f"scale={w}:{h},zoompan=z='min(zoom+0.0009,1.08)':d={frames}:"
-        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps=30,setsar=1,"
+        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps={fps},setsar=1,"
         f"fade=t=in:st=0:d=0.5,fade=t=out:st={secs-0.6:.2f}:d=0.6,format=yuv420p"
     )
     await _run([
         "ffmpeg", "-y", "-loop", "1", "-i", png,
-        "-vf", vf, "-t", f"{secs}", "-r", "30",
+        "-vf", vf, "-t", f"{secs}", "-r", f"{fps}",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
         out_path,
     ])

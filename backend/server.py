@@ -739,6 +739,26 @@ else:
     )
 
 
+async def _video_sweeper():
+    """Safety net: mark videos stuck in 'processing' > 8 min as failed and refund credits."""
+    while True:
+        try:
+            await asyncio.sleep(120)
+            cutoff = (datetime.now(timezone.utc) - timedelta(minutes=8)).isoformat()
+            stuck = await db.videos.find(
+                {"status": "processing", "created_at": {"$lt": cutoff}}, {"_id": 0}
+            ).to_list(100)
+            for v in stuck:
+                r = await db.videos.update_one(
+                    {"id": v["id"], "status": "processing"}, {"$set": {"status": "failed"}}
+                )
+                if r.modified_count and v.get("cost"):
+                    await db.users.update_one({"user_id": v["user_id"]}, {"$inc": {"credits": v["cost"]}})
+                    logger.info("swept stuck video %s, refunded %s", v["id"], v["cost"])
+        except Exception:
+            logger.exception("video sweeper error")
+
+
 @app.on_event("startup")
 async def startup():
     await db.users.create_index("email", unique=True)
@@ -762,6 +782,8 @@ async def startup():
         logger.info("Recovered %s orphaned videos", len(orphaned_videos))
     await db.photos.update_many({"status": "processing"}, {"$set": {"status": "ready"}})
     await db.jobs.update_many({"status": "processing"}, {"$set": {"status": "done"}})
+
+    asyncio.create_task(_video_sweeper())
 
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@watchful.app").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "Watchful2026!")
