@@ -1,0 +1,27 @@
+{
+  "summary": "Iter 3 — validated the reported bug fix (video hang + event-loop blocking). Backend pytest 5/5 in 44s: (1) bundled ffmpeg via imageio-ffmpeg exists on preview, (2) tour 12-cred generation completes end-to-end (~30s for 6 photos) and file served as video/mp4 >10KB, (3) reel 8-cred generation completes, (4) 402 in Spanish for insufficient credits with NO dangling processing video row, (5) CRITICAL responsiveness: while a tour is 'processing', repeated probes to GET /api/properties/{id}/videos + GET /api/files/{photo} + GET /api/videos/{id} all returned <2s and 2xx (100% fast ratio, 0 non-2xx across ~45 probes), plus 15 concurrent /videos requests all <2s → asyncio.to_thread fix confirmed, event loop NOT blocked. Frontend (Playwright, preview URL): admin login OK → property view with data-testid='video-btn' → dialog exposes video-format-tour/reel + video-music-toggle + video-agency-input + video-confirm; selecting reel, filling 'Agencia UI' and confirming deducts 8 credits (408→400), videos-section shows 'Generando video…' then swaps to a real <video> with tokenized /api/files URL in ~12s, video-download-{id} button rendered. No console errors, no 5xx during generation.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_video_responsiveness.py",
+    "/app/backend/tests/test_video_payments.py",
+    "/app/test_reports/pytest/pytest_iter3.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "video.py:_esc() strips ':' entirely from agency/subtitle — a street like 'Calle Mayor 3, Madrid' loses colons; agency names may become mangled. Consider escaping only ffmpeg-special chars instead of dropping them. (Currently the title card is drawn with Pillow so ':' is fine there; only concat/-vf paths still call _esc — verify it's still needed.)",
+    "server.py startup: orphan-video cleanup only refunds videos in 'processing'; consider a similar safety net for jobs or add a background sweeper (>10min processing → fail+refund) to guard against a truly stuck ffmpeg on prod.",
+    "server.py still uses @app.on_event('startup') (deprecated in FastAPI >=0.109). Migrate to lifespan handler.",
+    "PropertyView.jsx:loadVideos schedules setTimeout(loadVideos, 4000) without clearing on unmount → setState on unmounted component warnings possible when user navigates away mid-generation.",
+    "video.py generate_video: title clip fixed 2.2s + N*secs — for reels with max 8 photos this can produce a 22s video; consider capping and providing a progress hint in /api/videos/{id} (e.g., expected_duration) to improve UX during polling."
+  ],
+  "updated_files": ["/app/backend/tests/test_video_responsiveness.py", "/app/test_reports/iteration_3.json"],
+  "success_rate": {"backend": "100% (5/5 iter3 + 10/10 iter2 still green)", "frontend": "100% of tested video flow"},
+  "test_credentials": "admin@watchful.app / Watchful2026! — env admin had 408 residual credits.",
+  "seed_data_creation": "Test fixture creates 'TEST_VidResp' property w/ 6 photos and deletes it on teardown. UI test created 'UI_VideoTest' (deleted after).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run pytest with REACT_APP_BACKEND_URL env var set. Responsiveness test uses 6 photos → ~30-40s of ffmpeg while probing every ~2s from the same event loop; if this regresses (blocked event loop), the assertion `fast_ratio >= 0.9` will fail. NOTE: bug was originally reported on emergent.host production; preview now runs the exact same bundled ffmpeg — the user must REPUBLISH so prod picks up video.py + server.py fixes.",
+  "rca_of_the_issue": "Root cause (as fixed in code, verified here): (a) production image lacked system ffmpeg; solved by shipping imageio-ffmpeg and calling get_ffmpeg_exe() from video.py, but that bundled ffmpeg has no drawtext filter → drawing the title with Pillow (_render_title_png) avoided the crash. (b) storage.get_object / put_object are synchronous IO that were called from the request coroutine, blocking the event loop for the ~30-90s of ffmpeg work — every concurrent /api/videos or /api/files request was queued behind it, appearing as an infinite hang. Fix: wrap every storage call inside _process_video and serve_file with `await asyncio.to_thread(...)`; startup marks orphaned 'processing' videos as failed and refunds credits. Reproduction: before fix, POST /video then hitting /properties/{id}/videos would time out on the ingress. After fix: 45+ probes during a live generation all returned in <2s and no 5xx observed."
+}
