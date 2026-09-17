@@ -172,7 +172,7 @@ export default function Editor() {
         <div className="flex items-center gap-2 sm:gap-3">
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-violet-500/40 bg-violet-500/10" data-testid="editor-credits">
             <Zap className="w-3.5 h-3.5 text-cyan-400 fill-cyan-400" />
-            <span className="text-sm font-semibold text-white tabular-nums">{user?.credits}</span>
+            <span className="text-sm font-semibold text-white tabular-nums">{user?.unlimited ? "∞" : user?.credits}</span>
           </div>
           {hasEdits && (
             <Button onClick={revert} variant="outline" size="sm" data-testid="revert-btn"
@@ -323,14 +323,14 @@ export default function Editor() {
             )}
           </div>
 
-          {confirmAction && confirmAction.cost > (user?.credits ?? 0) ? (
+          {confirmAction && !user?.unlimited && confirmAction.cost > (user?.credits ?? 0) ? (
             <p className="text-sm text-red-400 text-center">Créditos insuficientes.</p>
           ) : null}
 
           <DialogFooter>
             <Button
               onClick={apply}
-              disabled={confirmAction && confirmAction.cost > (user?.credits ?? 0)}
+              disabled={confirmAction && !user?.unlimited && confirmAction.cost > (user?.credits ?? 0)}
               data-testid="confirm-apply-btn"
               className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter] w-full">
               Aplicar {confirmAction?.cost === 0 ? "gratis" : `· ${confirmAction?.cost} créditos`}

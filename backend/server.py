@@ -37,6 +37,13 @@ app = FastAPI(title="Watchful API")
 api = APIRouter(prefix="/api")
 
 FREE_CREDITS = 30
+OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "krimagina@gmail.com").lower().strip()
+
+
+def is_owner(user: dict) -> bool:
+    if not user:
+        return False
+    return user.get("role") == "owner" or (user.get("email", "").lower() == OWNER_EMAIL)
 COOKIE_KW = dict(httponly=True, secure=True, samesite="none", path="/")
 
 
@@ -99,14 +106,15 @@ async def current_user(request: Request):
 
 
 def public_user(user: dict) -> dict:
+    owner = is_owner(user)
     return {
         "user_id": user["user_id"],
         "email": user["email"],
         "name": user.get("name", ""),
         "picture": user.get("picture"),
-        "role": user.get("role", "user"),
+        "role": "owner" if owner else user.get("role", "user"),
         "credits": user.get("credits", 0),
-        "auth_provider": user.get("auth_provider", "email"),
+        "unlimited": owner,
     }
 
 
@@ -403,19 +411,19 @@ async def edit_photo(photo_id: str, data: EditInput, user: dict = Depends(curren
         raise HTTPException(status_code=404, detail="Foto no encontrada")
 
     cost = ai_edit.ACTIONS[data.action]["cost"]
-    fresh = await db.users.find_one({"user_id": user["user_id"]})
-    if cost > 0 and fresh.get("credits", 0) < cost:
-        raise HTTPException(status_code=402, detail="Créditos insuficientes")
-
-    if cost > 0:
-        await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": -cost}})
+    charge = 0 if is_owner(user) else cost
+    if charge > 0:
+        fresh = await db.users.find_one({"user_id": user["user_id"]})
+        if fresh.get("credits", 0) < charge:
+            raise HTTPException(status_code=402, detail="Créditos insuficientes")
+        await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": -charge}})
     await db.photos.update_one({"id": photo_id}, {"$set": {"status": "processing"}})
     try:
         updated = await _apply_edit(photo, data.action, data.options, data.disclosure)
     except Exception as e:
         logger.exception("edit failed")
-        if cost > 0:
-            await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": cost}})
+        if charge > 0:
+            await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": charge}})
         await db.photos.update_one({"id": photo_id}, {"$set": {"status": "ready"}})
         raise HTTPException(status_code=500, detail="La edición falló. Tus créditos han sido reembolsados.")
 
@@ -458,12 +466,12 @@ async def batch_edit(property_id: str, data: BatchInput, user: dict = Depends(cu
     if not photos:
         raise HTTPException(status_code=400, detail="No hay fotos para procesar")
 
-    unit_cost = ai_edit.ACTIONS[data.action]["cost"]
+    unit_cost = 0 if is_owner(user) else ai_edit.ACTIONS[data.action]["cost"]
     total_cost = unit_cost * len(photos)
-    fresh = await db.users.find_one({"user_id": user["user_id"]})
-    if total_cost > 0 and fresh.get("credits", 0) < total_cost:
-        raise HTTPException(status_code=402, detail=f"Necesitas {total_cost} créditos para este lote")
     if total_cost > 0:
+        fresh = await db.users.find_one({"user_id": user["user_id"]})
+        if fresh.get("credits", 0) < total_cost:
+            raise HTTPException(status_code=402, detail=f"Necesitas {total_cost} créditos para este lote")
         await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": -total_cost}})
 
     job = {
@@ -569,11 +577,12 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
     if not photos:
         raise HTTPException(status_code=400, detail="No hay fotos para el video")
 
-    cost = VIDEO_COSTS[fmt]
-    fresh = await db.users.find_one({"user_id": user["user_id"]})
-    if fresh.get("credits", 0) < cost:
-        raise HTTPException(status_code=402, detail=f"Necesitas {cost} créditos para generar este video")
-    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": -cost}})
+    cost = 0 if is_owner(user) else VIDEO_COSTS[fmt]
+    if cost > 0:
+        fresh = await db.users.find_one({"user_id": user["user_id"]})
+        if fresh.get("credits", 0) < cost:
+            raise HTTPException(status_code=402, detail=f"Necesitas {cost} créditos para generar este video")
+        await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": -cost}})
 
     storage_paths = [p.get("current_path") or p["original_path"] for p in photos]
     video_doc = {
@@ -801,6 +810,13 @@ async def startup():
         })
     elif not auth_utils.verify_password(admin_password, existing.get("password_hash", "")):
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": auth_utils.hash_password(admin_password)}})
+
+    # Promote the app owner (unlimited, non-consuming credits) if the account already exists.
+    if OWNER_EMAIL:
+        await db.users.update_one(
+            {"email": OWNER_EMAIL},
+            {"$set": {"role": "owner", "credits": 999999}},
+        )
 
 
 @app.on_event("shutdown")

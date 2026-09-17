@@ -31,17 +31,17 @@ export default function Header({ actions }) {
           {user && (
             <>
               <button
-                onClick={() => setBuyOpen(true)}
+                onClick={() => !user.unlimited && setBuyOpen(true)}
                 data-testid="credit-counter"
-                title="Comprar créditos"
+                title={user.unlimited ? "Créditos ilimitados" : "Comprar créditos"}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-violet-500/40 bg-violet-500/10 shadow-[0_0_16px_rgba(139,92,246,0.25)] hover:bg-violet-500/20 transition-colors"
               >
                 <Zap className="w-4 h-4 text-cyan-400 fill-cyan-400" />
                 <span className="text-sm font-semibold text-white tabular-nums" data-testid="credit-amount">
-                  {user.credits}
+                  {user.unlimited ? "∞" : user.credits}
                 </span>
                 <span className="hidden sm:inline text-xs text-slate-400">créditos</span>
-                <Plus className="w-3.5 h-3.5 text-cyan-300 ml-0.5" />
+                {!user.unlimited && <Plus className="w-3.5 h-3.5 text-cyan-300 ml-0.5" />}
               </button>
 
               <DropdownMenu>

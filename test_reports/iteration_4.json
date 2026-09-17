@@ -1,0 +1,33 @@
+{
+  "summary": "Iter 4 — reproduced the exact user scenario (real ~2560px JPEGs, 11 photos) end-to-end. Backend pytest 2/2 in 79s using preview URL: (1) TOUR 11 photos completes in 45.1s ('done'), 12 credits deducted, final MP4 served as video/mp4, 36 responsiveness probes all <2s (0 slow, 0 non-2xx) → asyncio.to_thread + 1.25x working-resolution + 180s ffmpeg timeout fix confirmed on the real workload that failed in prod. (2) REEL 11 photos completes ('done'), 8 credits deducted. Playwright UI test (admin login → property with 11 real 2560px JPEGs → data-testid='video-btn' → dialog with video-format-tour + video-music-toggle + video-agency-input='Costa Real' + video-confirm → 'Generando video…' → <video> element with tokenized /api/files/...mp4 src and video-download-{id} button). Credits math checks out (348→336→328→316 across the 3 generations). No 5xx, no timeouts, no console errors during any run. Bug is FIXED in code — user must REPUBLISH so production picks up video.py + server.py.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_video_11_photos.py",
+    "/app/backend/tests/test_video_responsiveness.py",
+    "/app/backend/tests/test_video_payments.py",
+    "/app/test_reports/pytest/pytest_iter4.xml"
+  ],
+  "action_items": [
+    "REPUBLISH: fix lives in preview only; the user's failing production emergent.host still runs pre-fix code. Instruct user to redeploy so prod picks up the 1.25x working resolution, veryfast preset, 25fps, 180s ffmpeg timeout, and the _video_sweeper background task."
+  ],
+  "critical_code_review_comments": [
+    "video.py:_esc() still strips ':' and '%' from titles/subtitles — a subtitle like 'Calle Mayor 3, 12:00h' loses the colon. Since the title card is now drawn via Pillow (_render_title_png), _esc no longer runs on user text in the visible path, but leaving that footgun in the codebase is a landmine if someone later reroutes drawtext.",
+    "server.py: _video_sweeper marks 'processing' >8min as failed+refund — good safety net, but consider also killing any live ffmpeg subprocess associated with that video row; today the sweeper only updates the DB record while the subprocess may keep chewing CPU until its own 180s per-step timeout.",
+    "PropertyView.jsx polling loop (setTimeout 4s) does not clear on unmount — same comment as iter 3, still not addressed.",
+    "video.py generate_video: title clip fixed 2.2s + 3.5s * N — with 11 photos tour is ~40s of playback, which is fine, but /api/videos/{id} response could expose 'expected_duration' or a % progress to improve the 'Generando video…' UX (currently a bare spinner for up to 60s).",
+    "video.py uses asyncio.wait_for on communicate() but does not reap zombie ffmpeg PGIDs — if a subprocess ignores SIGKILL (very unlikely with ffmpeg) it can linger. Consider os.killpg with SIGKILL for defensive belt-and-suspenders."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_video_11_photos.py",
+    "/app/test_reports/iteration_4.json"
+  ],
+  "success_rate": {"backend": "100% (2/2 iter4, 15/15 cumulative across iters)", "frontend": "100% of 11-photo tour flow"},
+  "test_credentials": "admin@watchful.app / Watchful2026! (admin credit balance moved 348→316 during this iteration)",
+  "seed_data_creation": "Fixture 'TEST_Vid11' (backend) and 'UI_Vid11' (Playwright) each seeded with 11 real ~2560px JPEGs generated in-memory via Pillow; both properties deleted on teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Bug reproduced with the user's exact volume (11×2560px). Preview is green end-to-end (backend + UI). If reopened, first check the user actually REPUBLISHED — bug may resurface only on the old prod bundle. To re-run: `REACT_APP_BACKEND_URL=<preview> pytest backend/tests/test_video_11_photos.py -v -s -n 0` (needs -n 0 because pytest.ini forces xdist).",
+  "rca_of_the_issue": "Root cause chain (fixed & re-validated this iteration): (a) production image had no system ffmpeg → bundled imageio-ffmpeg used; (b) that bundled build lacks drawtext filter → title rendered with Pillow (_render_title_png); (c) zoompan was previously working at 2x resolution (3840x2160 for tour) — extremely CPU/RAM heavy on prod nodes and pushed a single _make_clip past the ingress timeout → user saw indefinite 'Generando video…'. Fix in video.py: working resolution dropped to 1.25x, preset=veryfast, fps=25, plus asyncio.wait_for(180s) around every subprocess call. Fix in server.py: _process_video wraps all storage IO in asyncio.to_thread (keeps event loop responsive so /api/properties/{id}/videos and /api/files stay <2s during generation); startup registers _video_sweeper() that every 2 min marks any 'processing' video older than 8 min as 'failed' and refunds credits. Reproduction (iter 4): 11 real 2560px JPEGs → tour finished in 45.1s, 36 probes all <2s, mp4 playable; UI flow identical."
+}
