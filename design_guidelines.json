@@ -1,0 +1,151 @@
+{
+  "theme": "dark",
+  "language": "es",
+  "typography": {
+    "headings": "Outfit, sans-serif",
+    "body": "Inter, sans-serif",
+    "weights": {
+      "light": 300,
+      "regular": 400,
+      "medium": 500,
+      "semibold": 600,
+      "bold": 700
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight font-bold text-white",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-semibold text-slate-100",
+      "h3": "text-xl sm:text-2xl font-medium text-slate-200",
+      "h4": "text-lg font-medium text-slate-300",
+      "body": "text-base text-slate-400 leading-relaxed",
+      "small": "text-sm text-slate-500",
+      "overline": "text-xs uppercase tracking-[0.2em] font-semibold text-violet-400"
+    }
+  },
+  "colors": {
+    "background": "#0B0A10",
+    "surface": "#15131C",
+    "surface_elevated": "#1E1A29",
+    "primary": "#06B6D4",
+    "primary_hover": "#0891B2",
+    "accent_ai": "#8B5CF6",
+    "text_primary": "#F8FAFC",
+    "text_secondary": "#94A3B8",
+    "border": "#2D2640",
+    "success": "#10B981",
+    "warning": "#F59E0B",
+    "error": "#EF4444",
+    "gradient_ai": "bg-gradient-to-r from-violet-600 to-cyan-500"
+  },
+  "visual_enhancers": {
+    "shadows": {
+      "glow_ai": "shadow-[0_0_20px_rgba(139,92,246,0.3)]",
+      "panel": "shadow-[0_8px_32px_rgba(0,0,0,0.4)]"
+    },
+    "surfaces": {
+      "glass": "backdrop-blur-xl bg-[#15131C]/80 border border-white/5",
+      "solid": "bg-[#15131C] border border-[#2D2640]"
+    },
+    "borders": {
+      "radius": {
+        "sm": "rounded-md",
+        "md": "rounded-lg",
+        "lg": "rounded-xl",
+        "full": "rounded-full"
+      }
+    }
+  },
+  "components": {
+    "header": "Sticky header with glassmorphism (backdrop-blur-xl bg-[#15131C]/80). Must contain the Credit Counter ('⚡ 30 Créditos') prominently, preferably with a subtle violet/cyan glowing border to emphasize AI. Do NOT use completely transparent background.",
+    "buttons": {
+      "primary": "Pill-shaped, using gradient_ai for high-impact actions like 'Generar' or 'Aplicar IA', solid cyan for standard primary actions. Add hover state with brightness increase and scale up (using framer-motion).",
+      "secondary": "Solid elevated surface with subtle white/10 border. Hover changes to white/20 border and text color brightens.",
+      "ghost": "Transparent background, hover gets white/5 background."
+    },
+    "cards": {
+      "listing": "Flat solid card for property listings. Image thumbnail (max-h-48, object-cover), title, photo count, and status badge. Subtle hover lift (-translate-y-1).",
+      "editor_panel": "Side panel in Editor using 'solid' surface if docked or 'glass' if floating. High density layout for AI adjustment sliders (Sky, Lighting, Declutter).",
+      "photo_thumbnail": "Square or 4:3 aspect ratio. Overlay on hover to show 'Editar' or 'Eliminar' actions. Status indicator badge for 'Original' or 'Imagen editada digitalmente'."
+    },
+    "editor_canvas": "The central area of the editor. Must dominate the screen. Uses a dark neutral background (#050505) to let the photo pop. Integrates a before/after slider overlay.",
+    "credit_modal": "Confirmation modal (Shadcn Dialog) before applying AI edits. Shows cost ('Coste: 2 créditos') and remaining balance. Use warning colors if credits are insufficient.",
+    "job_queue": "Floating toast or bottom panel showing processing status with a progress bar. Use violet/cyan gradient for the progress fill."
+  },
+  "grids": {
+    "marketing": "grid-cols-1 md:grid-cols-12 gap-8. Hero uses col-span-full. Features use bento grid (Tetris grid: col-span-8 and col-span-4 combinations).",
+    "dashboard": "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6. Dense layout for listings and photo galleries."
+  },
+  "layouts": {
+    "marketing_page": "Hero section with large before/after interactive image, clear value prop in Spanish, and CTA. Bento grid for features. Dark moody aesthetic.",
+    "dashboard_app": "Top header with navigation and credit counter. Main content area with a grid of properties. Each property acts as a folder for its images and videos.",
+    "property_view": "Breadcrumbs at top. Header with Property Title. Grid of photos. Upload dropzone prominently placed.",
+    "editor_view": "Full-screen layout (h-screen). Top bar with 'Volver' and 'Guardar/Exportar'. Left/Right side panels (width 320px) for tools. Central flex-grow area for the image canvas."
+  },
+  "motion": {
+    "transitions": "Use specific transitions, e.g., 'transition-colors duration-200', 'transition-transform duration-300 ease-out'. Avoid 'transition-all'.",
+    "animations": "Framer motion for page transitions, staggered list appearances in dashboards, and the before/after slider handle.",
+    "micro_interactions": "Buttons scale down slightly on tap (scale: 0.98). Hovering over a photo thumbnail shows a subtle violet glow."
+  },
+  "accessibility": {
+    "contrast": "Ensure text over dark backgrounds meets minimum 4.5:1 ratio. Off-white text on #0B0A10 is highly readable.",
+    "focus": "focus:ring-2 focus:ring-cyan-500 focus:outline-none focus:ring-offset-2 focus:ring-offset-[#0B0A10] for all interactive elements.",
+    "aria": "Include aria-labels on AI tool toggles and the before/after slider.",
+    "test_attributes": "All interactive elements MUST have data-testid attributes (e.g., data-testid='credit-counter', data-testid='apply-sky-btn')."
+  },
+  "media": {
+    "images": [
+      {
+        "url": "https://images.unsplash.com/photo-1605276374104-dee2a0ed3cd6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1Mjh8MHwxfHNlYXJjaHwzfHxyZWFsJTIwZXN0YXRlJTIwaG91c2UlMjBleHRlcmlvciUyMGRheXxlbnwwfHx8fDE3ODk2NTg1MzV8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Modern house day exterior",
+        "category": "marketing_before",
+        "usage": "Use as the 'Before' image in the marketing page hero slider."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1494526585095-c41746248156?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzl8MHwxfHNlYXJjaHwxfHxyZWFsJTIwZXN0YXRlJTIwaG91c2UlMjB0d2lsaWdodHxlbnwwfHx8fDE3ODk2NTg1MzV8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Modern house twilight exterior",
+        "category": "marketing_after",
+        "usage": "Use as the 'After' image in the marketing page hero slider to demonstrate Twilight AI feature."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1757924461488-ef9ad0670978?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzJ8MHwxfHNlYXJjaHwyfHxtb2Rlcm4lMjBsaXZpbmclMjByb29tJTIwbHV4dXJ5JTIwaW50ZXJpb3J8ZW58MHx8fHwxNzg5NjU4NTM1fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Luxury living room interior",
+        "category": "dashboard_thumbnail",
+        "usage": "Use as placeholder thumbnails for property listings in the dashboard."
+      },
+      {
+        "url": "https://images.pexels.com/photos/16808496/pexels-photo-16808496.png?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Contemporary architecture glowing at twilight",
+        "category": "editor_canvas_placeholder",
+        "usage": "Use as the main image loaded in the editor canvas mockups."
+      }
+    ]
+  },
+  "libraries": {
+    "icons": "lucide-react",
+    "animations": "framer-motion",
+    "components": "shadcn/ui (customized for dark mode with border-white/5)",
+    "toasts": "sonner"
+  },
+  "instructions_to_main_agent": [
+    "Implement a unified Dark Theme ONLY (Modo oscuro). Do not build a light theme toggle as per pro-media aesthetic requirements.",
+    "The UI must be entirely in Spanish ('Propiedades', 'Créditos', 'Editar', 'Imagen editada digitalmente').",
+    "Build the Editor View as a full-screen layout. The center should be a large canvas for the image. The side panel should contain a dense, pro-level set of controls for AI features (Cielo/Twilight, Declutter, Corrección de Luz/Color/HDR, Enderezar).",
+    "Implement a custom Before/After slider component overlay on the editor canvas. It should allow dragging left/right to compare original vs edited.",
+    "Ensure the Credit Counter ('⚡ 30') is prominently visible in the global header.",
+    "Before executing an AI edit from the side panel, trigger a confirmation modal (Shadcn Dialog) stating the cost ('Coste: X créditos') and requiring user confirmation.",
+    "Include an 'Imagen editada digitalmente' (Disclosure tag) badge clearly on images that have been processed.",
+    "The app must be a PWA and web responsive. Ensure mobile views gracefully handle the editor canvas and side panels (e.g., bottom sheet for tools on mobile).",
+    "Use standard HTML/Tailwind for marketing page bento layouts to achieve dynamic asymmetry. Use Shadcn for interactive dashboard and editor components."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Do not use generic centered layouts or simplistic gradients. Create depth using z-index hierarchy and glassmorphism (backdrop-blur-xl).",
+    "Never apply universal transitions (e.g., transition: all). Add specific transitions for interactive elements.",
+    "Do not center align the app container (.App { text-align: center; }).",
+    "Always use modern button styles (pill-shaped or sharp with interaction animations).",
+    "Never use AI assistant emojis for icons. Use lucide-react.",
+    "Every interaction needs micro-animations (hover states, transitions).",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Ensure all interactive elements have data-testid attributes.",
+    "Use sonner for toast notifications.",
+    "NEVER use placeholder text for images, use provided media URLs."
+  ]
+}

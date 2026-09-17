@@ -1,0 +1,16 @@
+{
+  "short_name": "Watchful",
+  "name": "Watchful — Fotografía Inmobiliaria con IA",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#0B0A10",
+  "theme_color": "#0B0A10",
+  "description": "Edita fotos de inmuebles con IA y genera videos-tour. Watchful.",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}
