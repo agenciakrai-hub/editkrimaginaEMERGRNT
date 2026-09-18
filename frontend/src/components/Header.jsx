@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import Logo from "@/components/Logo";
 import BuyCreditsDialog from "@/components/BuyCreditsDialog";
-import { Zap, LogOut, LayoutGrid, Plus } from "lucide-react";
+import { Zap, LogOut, LayoutGrid, Plus, ShieldCheck } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -67,6 +67,15 @@ export default function Header({ actions }) {
                   >
                     <LayoutGrid className="w-4 h-4 mr-2" /> Mis propiedades
                   </DropdownMenuItem>
+                  {user.is_super_admin && (
+                    <DropdownMenuItem
+                      data-testid="menu-admin"
+                      onClick={() => navigate("/app/admin")}
+                      className="cursor-pointer focus:bg-white/10 text-violet-300"
+                    >
+                      <ShieldCheck className="w-4 h-4 mr-2" /> Panel admin
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem
                     data-testid="logout-btn"
                     onClick={async () => {

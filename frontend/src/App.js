@@ -10,6 +10,7 @@ import AuthCallback from "@/pages/AuthCallback";
 import Dashboard from "@/pages/Dashboard";
 import PropertyView from "@/pages/PropertyView";
 import Editor from "@/pages/Editor";
+import Admin from "@/pages/Admin";
 import PaymentSuccess from "@/pages/PaymentSuccess";
 import PaymentCancel from "@/pages/PaymentCancel";
 
@@ -46,6 +47,14 @@ function AppRouter() {
         element={
           <ProtectedRoute>
             <Editor />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/admin"
+        element={
+          <ProtectedRoute>
+            <Admin />
           </ProtectedRoute>
         }
       />

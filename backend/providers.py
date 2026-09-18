@@ -1,0 +1,134 @@
+"""AI provider adapters for the admin panel.
+
+Supports adding external AI sources (OpenAI-compatible endpoints such as OpenAI,
+OpenRouter, Nvidia NIM, Groq, Together, plus a curated fal.ai catalogue). Handles
+model discovery, key/status validation, and running a real image edit through the
+selected provider so an admin can override the default Gemini engine per tool.
+
+All functions here are synchronous (network I/O); callers must run them in a thread.
+"""
+import io
+import logging
+import requests
+
+logger = logging.getLogger("watchful.providers")
+
+# Substrings that identify an image-generation/editing capable model.
+_IMAGE_HINTS = (
+    "image", "gpt-image", "dall-e", "dalle", "flux", "imagen", "nano-banana",
+    "stable-diffusion", "sdxl", "sd3", "seedream", "kontext", "qwen-image",
+)
+
+# Curated fal.ai catalogue (fal has no key-authed /models listing endpoint).
+FAL_MODELS = [
+    {"id": "fal-ai/nano-banana/edit", "name": "Nano Banana (edit)", "kind": "image", "can_edit": True},
+    {"id": "fal-ai/gemini-25-flash-image/edit", "name": "Gemini 2.5 Flash Image (edit)", "kind": "image", "can_edit": True},
+    {"id": "fal-ai/flux-pro/kontext", "name": "FLUX.1 Kontext (edit)", "kind": "image", "can_edit": True},
+    {"id": "fal-ai/flux/dev", "name": "FLUX.1 [dev]", "kind": "image", "can_edit": False},
+    {"id": "fal-ai/qwen-image-edit", "name": "Qwen Image Edit", "kind": "image", "can_edit": True},
+    {"id": "fal-ai/seedream/v4/edit", "name": "Seedream v4 (edit)", "kind": "image", "can_edit": True},
+]
+
+
+def _kind_for(model_id: str):
+    low = (model_id or "").lower()
+    is_image = any(h in low for h in _IMAGE_HINTS)
+    return ("image" if is_image else "text"), is_image
+
+
+def _norm(base_url: str) -> str:
+    return (base_url or "").strip().rstrip("/")
+
+
+def detect(provider_type: str, base_url: str, api_key: str) -> dict:
+    """Return {status, models:[{id,name,kind,can_edit}], error?}.
+
+    status one of: valid | no_credits | invalid_key | error
+    """
+    if provider_type == "fal":
+        if not api_key:
+            return {"status": "invalid_key", "models": []}
+        return {"status": "valid", "models": [dict(m) for m in FAL_MODELS]}
+
+    url = _norm(base_url) + "/models"
+    try:
+        r = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=20)
+    except Exception as e:
+        logger.warning("provider detect network error: %s", e)
+        return {"status": "error", "models": [], "error": str(e)}
+
+    if r.status_code in (401, 403):
+        return {"status": "invalid_key", "models": []}
+    if r.status_code in (402, 429):
+        return {"status": "no_credits", "models": []}
+    if r.status_code >= 400:
+        return {"status": "error", "models": [], "error": f"HTTP {r.status_code}"}
+
+    try:
+        payload = r.json()
+        raw = payload.get("data", payload) if isinstance(payload, dict) else payload
+        models = []
+        for m in raw:
+            mid = m.get("id") if isinstance(m, dict) else str(m)
+            if not mid:
+                continue
+            kind, can_edit = _kind_for(mid)
+            models.append({"id": mid, "name": mid, "kind": kind, "can_edit": can_edit})
+        models.sort(key=lambda x: (x["kind"] != "image", x["id"]))
+        return {"status": "valid", "models": models}
+    except Exception as e:
+        logger.warning("provider detect parse error: %s", e)
+        return {"status": "error", "models": [], "error": "respuesta no válida"}
+
+
+def run_image_edit(provider: dict, model_id: str, image_bytes: bytes, prompt: str) -> bytes:
+    """Run an image edit through an external provider. Returns PNG bytes or raises."""
+    ptype = provider.get("type")
+    api_key = provider.get("api_key")
+    if ptype == "fal":
+        return _fal_edit(api_key, model_id, image_bytes, prompt)
+    return _openai_edit(_norm(provider.get("base_url")), api_key, model_id, image_bytes, prompt)
+
+
+def _openai_edit(base_url: str, api_key: str, model_id: str, image_bytes: bytes, prompt: str) -> bytes:
+    import base64
+    files = {"image": ("photo.png", io.BytesIO(image_bytes), "image/png")}
+    data = {"model": model_id, "prompt": prompt, "n": "1", "size": "auto"}
+    r = requests.post(
+        base_url + "/images/edits",
+        headers={"Authorization": f"Bearer {api_key}"},
+        files=files, data=data, timeout=180,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    item = payload["data"][0]
+    if item.get("b64_json"):
+        return base64.b64decode(item["b64_json"])
+    if item.get("url"):
+        img = requests.get(item["url"], timeout=60)
+        img.raise_for_status()
+        return img.content
+    raise RuntimeError("provider_no_image")
+
+
+def _fal_edit(api_key: str, model_id: str, image_bytes: bytes, prompt: str) -> bytes:
+    import base64
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    data_uri = f"data:image/png;base64,{b64}"
+    r = requests.post(
+        f"https://fal.run/{model_id}",
+        headers={"Authorization": f"Key {api_key}", "Content-Type": "application/json"},
+        json={"prompt": prompt, "image_url": data_uri, "num_images": 1},
+        timeout=180,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    images = payload.get("images") or payload.get("data", {}).get("images") or []
+    if not images:
+        raise RuntimeError("provider_no_image")
+    url = images[0].get("url") if isinstance(images[0], dict) else images[0]
+    if isinstance(url, str) and url.startswith("data:"):
+        return base64.b64decode(url.split(",", 1)[1])
+    img = requests.get(url, timeout=60)
+    img.raise_for_status()
+    return img.content

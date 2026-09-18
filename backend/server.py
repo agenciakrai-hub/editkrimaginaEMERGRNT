@@ -22,6 +22,8 @@ import ai_edit
 import imaging
 import video as video_gen
 import payments as pay
+import providers as ai_providers
+from admin import register_admin_routes
 import stripe
 import tempfile
 import shutil
@@ -42,12 +44,57 @@ OWNER_EMAILS = {
     for e in os.environ.get("OWNER_EMAIL", "krimagina2025@gmail.com,krimagina@gmail.com").split(",")
     if e.strip()
 }
+SUPER_ADMIN_EMAILS = {
+    e.strip().lower()
+    for e in os.environ.get("SUPER_ADMIN_EMAIL", "krimagina2025@gmail.com").split(",")
+    if e.strip()
+}
 
 
 def is_owner(user: dict) -> bool:
     if not user:
         return False
     return user.get("role") == "owner" or (user.get("email", "").lower() in OWNER_EMAILS)
+
+
+def is_super_admin(user: dict) -> bool:
+    if not user:
+        return False
+    return user.get("email", "").lower() in SUPER_ADMIN_EMAILS
+
+
+async def log_usage(user_id: str, kind: str, action: str, credits: int, gemini_calls: int, provider: str, model: str = None):
+    """Record a consumption event for the admin usage dashboard."""
+    try:
+        await db.usage_events.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "kind": kind,  # photo | video
+            "action": action,
+            "credits": credits,
+            "gemini_calls": gemini_calls,
+            "ai_calls": 1 if kind == "photo" else 0,
+            "provider": provider,
+            "model": model,
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        logger.exception("usage log failed")
+
+
+async def get_tool_override(action_key: str):
+    """Return (provider_doc, model_id) if an admin assigned a custom engine to this tool, else None."""
+    settings = await db.ai_settings.find_one({"id": "tool_overrides"})
+    if not settings:
+        return None
+    ov = (settings.get("overrides") or {}).get(action_key)
+    if not ov or not ov.get("provider_id") or not ov.get("model_id"):
+        return None
+    prov = await db.ai_providers.find_one({"id": ov["provider_id"]})
+    if not prov or prov.get("status") == "invalid_key":
+        return None
+    return prov, ov["model_id"]
+
 COOKIE_KW = dict(httponly=True, secure=True, samesite="none", path="/")
 
 
@@ -107,6 +154,7 @@ async def current_user(request: Request):
     user = await auth_utils.resolve_user(db, token)
     if not user:
         raise HTTPException(status_code=401, detail="No autenticado")
+    user["is_super_admin"] = is_super_admin(user)
     return user
 
 
@@ -120,6 +168,9 @@ def public_user(user: dict) -> dict:
         "role": "owner" if owner else user.get("role", "user"),
         "credits": user.get("credits", 0),
         "unlimited": owner,
+        "is_super_admin": is_super_admin(user),
+        "plan_name": user.get("plan_name"),
+        "plan_expires_at": user.get("plan_expires_at"),
     }
 
 
@@ -388,7 +439,28 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     """Runs the AI edit on the photo's current image and persists a new result. Returns updated photo."""
     src_path = photo.get("current_path") or photo["original_path"]
     data, _ = storage.get_object(src_path)
-    result_bytes = await ai_edit.run_edit(data, action_key, options, session_id=f"edit_{photo['id']}")
+
+    override = await get_tool_override(action_key)
+    result_bytes = None
+    used_provider = "gemini"
+    used_model = ai_edit.MODEL
+    gemini_calls = 1
+    if override:
+        prov, model_id = override
+        prompt = ai_edit.build_prompt(action_key, options)
+        try:
+            result_bytes = await asyncio.to_thread(ai_providers.run_image_edit, prov, model_id, data, prompt)
+            used_provider = prov.get("name") or prov.get("type")
+            used_model = model_id
+            gemini_calls = 0
+        except Exception:
+            logger.exception("provider override failed, falling back to Gemini")
+            result_bytes = None
+    if not result_bytes:
+        result_bytes = await ai_edit.run_edit(data, action_key, options, session_id=f"edit_{photo['id']}")
+        used_provider = "gemini"
+        used_model = ai_edit.MODEL
+        gemini_calls = 1
     if not result_bytes:
         raise RuntimeError("no_image")
     out_path = f"{storage.APP_NAME}/edits/{photo['user_id']}/{uuid.uuid4()}.png"
@@ -404,6 +476,7 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
             "$push": {"edits": edit_entry},
         },
     )
+    await log_usage(photo["user_id"], "photo", action_key, action["cost"], gemini_calls, used_provider, used_model)
     return await db.photos.find_one({"id": photo["id"]}, {"_id": 0})
 
 
@@ -560,6 +633,7 @@ async def _process_video(video_id, user_id, items, fmt, title, subtitle, music, 
             {"$set": {"status": "done", "storage_path": stored["path"],
                       "finished_at": datetime.now(timezone.utc).isoformat()}},
         )
+        await log_usage(user_id, "video", fmt, VIDEO_COSTS.get(fmt, 0), 0, "ffmpeg", None)
     except Exception:
         logger.exception("video generation failed")
         if cost > 0:
@@ -755,6 +829,8 @@ async def stripe_webhook(request: Request):
 async def root():
     return {"message": "Watchful API", "status": "ok"}
 
+
+register_admin_routes(api, db, current_user, ai_edit.ACTIONS)
 
 app.include_router(api)
 

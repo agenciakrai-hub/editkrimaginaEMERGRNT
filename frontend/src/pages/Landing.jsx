@@ -1,12 +1,13 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import Logo from "@/components/Logo";
 import BeforeAfterSlider from "@/components/BeforeAfterSlider";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import {
-  Sun, Moon, Eraser, Sofa, Wand2, SlidersHorizontal, Sparkles, ArrowRight, Zap, ShieldCheck, Layers,
+  Sun, Moon, Eraser, Sofa, Wand2, SlidersHorizontal, Sparkles, ArrowRight, Zap, ShieldCheck, Layers, Check, Crown,
 } from "lucide-react";
 
 const BEFORE = "https://images.unsplash.com/photo-1605276374104-dee2a0ed3cd6?crop=entropy&cs=srgb&fm=jpg&q=85";
@@ -25,6 +26,13 @@ export default function Landing() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const cta = user ? "/app" : "/register";
+  const [plans, setPlans] = useState([]);
+
+  useEffect(() => {
+    api.get("/plans").then((r) => setPlans(r.data)).catch(() => setPlans([]));
+  }, []);
+
+  const PERIODS = { monthly: "mes", yearly: "año", one_time: "pago único" };
 
   return (
     <div className="min-h-screen bg-background text-white grain">
@@ -124,6 +132,47 @@ export default function Landing() {
           </div>
         ))}
       </section>
+
+      {/* Pricing (dynamic plans from admin) */}
+      {plans.length > 0 && (
+        <section id="planes" className="max-w-7xl mx-auto px-4 sm:px-6 py-16" data-testid="pricing-section">
+          <h2 className="font-display text-2xl sm:text-3xl font-semibold mb-3">Planes a tu medida</h2>
+          <p className="text-slate-400 mb-10 max-w-2xl">Elige un plan con créditos incluidos. ¿Se te acaban? Compra créditos extra cuando quieras.</p>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {plans.map((p, i) => (
+              <motion.div
+                key={p.id}
+                initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
+                transition={{ duration: 0.4, delay: i * 0.05 }}
+                data-testid={`plan-card-${p.id}`}
+                className={`relative rounded-2xl border p-7 bg-[#15131C] ${p.highlight ? "border-violet-500/60 shadow-[0_0_40px_rgba(139,92,246,0.25)]" : "border-white/5"}`}
+              >
+                {p.highlight && (
+                  <span className="absolute -top-3 left-7 inline-flex items-center gap-1 text-xs font-semibold px-3 py-1 rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 text-white">
+                    <Crown className="w-3 h-3" /> Recomendado
+                  </span>
+                )}
+                <h3 className="font-display text-xl font-medium">{p.name}</h3>
+                <p className="mt-3 text-4xl font-bold">
+                  {p.price_eur}€ <span className="text-base font-normal text-slate-400">/ {PERIODS[p.period] || p.period}</span>
+                </p>
+                <p className="mt-1 text-sm text-cyan-300 flex items-center gap-1.5"><Zap className="w-4 h-4 fill-cyan-300" /> {p.credits} créditos incluidos</p>
+                <ul className="mt-5 space-y-2.5">
+                  {(p.features || []).map((f, idx) => (
+                    <li key={idx} className="flex items-start gap-2 text-sm text-slate-300">
+                      <Check className="w-4 h-4 text-cyan-400 mt-0.5 shrink-0" /> {f}
+                    </li>
+                  ))}
+                </ul>
+                <Button onClick={() => navigate(cta)} data-testid={`plan-cta-${p.id}`}
+                  className={`mt-7 w-full rounded-full font-semibold ${p.highlight ? "bg-gradient-to-r from-violet-600 to-cyan-500 text-white hover:brightness-110 transition-[filter]" : "bg-white/10 hover:bg-white/20 text-white"}`}>
+                  Empezar
+                </Button>
+              </motion.div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Final CTA */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 py-20">
