@@ -170,11 +170,22 @@ function ProviderCard({ provider, onChanged }) {
 
 function ToolOverrides() {
   const [data, setData] = useState(null);
+  const [resetting, setResetting] = useState(false);
   const load = async () => {
     try { const { data } = await api.get("/admin/tool-overrides"); setData(data); }
     catch (err) { toast.error(apiError(err)); }
   };
   useEffect(() => { load(); }, []);
+
+  const resetAll = async () => {
+    if (!window.confirm("¿Restablecer TODAS las herramientas al motor por defecto (Gemini Nano Banana)? Las ediciones volverán a comportarse como en vista previa.")) return;
+    setResetting(true);
+    try {
+      await api.post("/admin/reset-engines");
+      toast.success("Todas las herramientas usan de nuevo Gemini Nano Banana");
+      load();
+    } catch (err) { toast.error(apiError(err)); } finally { setResetting(false); }
+  };
 
   const setOverride = async (action, value) => {
     try {
@@ -190,9 +201,23 @@ function ToolOverrides() {
 
   if (!data) return <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-cyan-400" /></div>;
   const { tools, overrides, photo_models } = data;
+  const activeCount = Object.keys(overrides || {}).length;
 
   return (
-    <div className="rounded-2xl border border-white/5 overflow-hidden">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-sm text-slate-400">
+          {activeCount > 0
+            ? `${activeCount} herramienta(s) usan un motor personalizado (no Gemini por defecto).`
+            : "Todas las herramientas usan Gemini Nano Banana por defecto."}
+        </p>
+        <Button onClick={resetAll} disabled={resetting || activeCount === 0} data-testid="reset-engines-btn"
+          className="rounded-full bg-white/10 hover:bg-white/20 text-white">
+          {resetting ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
+          Restablecer a Gemini por defecto
+        </Button>
+      </div>
+      <div className="rounded-2xl border border-white/5 overflow-hidden">
       <table className="w-full text-sm" data-testid="tool-overrides-table">
         <thead className="bg-white/5 text-slate-400">
           <tr>
@@ -230,6 +255,7 @@ function ToolOverrides() {
           Activa el toggle "Foto" en algún modelo de un proveedor para poder asignarlo a una herramienta.
         </p>
       )}
+      </div>
     </div>
   );
 }

@@ -292,3 +292,17 @@ def register_admin_routes(api, db, current_user, action_catalog):
             overrides.pop(data.action, None)
         await db.ai_settings.update_one({"id": "tool_overrides"}, {"$set": {"overrides": overrides}}, upsert=True)
         return {"ok": True, "overrides": overrides}
+
+    @api.post("/admin/reset-engines")
+    async def admin_reset_engines(delete_providers: bool = False, _: dict = Depends(require_admin)):
+        """Restore every photo tool to the default Gemini Nano Banana engine.
+
+        Clears all per-tool overrides. Optionally removes configured providers too.
+        Use this to make an environment behave exactly like the default (no custom engines).
+        """
+        await db.ai_settings.update_one({"id": "tool_overrides"}, {"$set": {"overrides": {}}}, upsert=True)
+        removed = 0
+        if delete_providers:
+            res = await db.ai_providers.delete_many({})
+            removed = res.deleted_count
+        return {"ok": True, "providers_removed": removed}
