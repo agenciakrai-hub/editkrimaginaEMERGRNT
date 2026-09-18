@@ -188,7 +188,7 @@ export default function Landing() {
 
       <footer className="border-t border-white/5 py-8 text-center text-sm text-slate-500">
         <Logo className="justify-center mb-3" size={26} />
-        Watchful · Fotografía y video inmobiliario con IA
+        edit KRimagina · Fotografía y video inmobiliario con IA
       </footer>
     </div>
   );

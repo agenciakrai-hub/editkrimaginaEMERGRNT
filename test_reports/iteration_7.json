@@ -1,0 +1,30 @@
+{
+  "summary": "End-to-end verification of the Watchful super-admin panel. 10/10 backend tests passed (access control, plan CRUD + landing sync, plan assignment with credit grant, usage aggregation, provider add/refresh/toggle, tool-override assign & cascade delete). Frontend UI verified end-to-end: super-admin sees 'menu-admin' link and /app/admin loads; normal user (agente@watchful.app) is redirected away from /app/admin and does not see menu-admin. All 3 admin tabs render (tab-users, tab-usage, tab-providers). Plan created via UI appears on public /pricing-section on landing and disappears when deleted. Users table + Consumo cards/table + Providers card grid all wired. Invalid OpenAI key -> 'Clave inválida' badge; fal provider -> 'Válido' with 6 curated models. Photo toggle enabled a model, that model then appeared as an option in tool-select-auto override; reverting to 'Por defecto (Gemini Nano Banana)' works. Deleting the fal provider cascades and removes the override (verified in backend test).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin dialogs", "issues": ["Console a11y warnings: 'Missing Description or aria-describedby' for Radix DialogContent (Nuevo plan / Asignar plan / Añadir proveedor). Non-blocking, but should add DialogDescription for a11y."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_panel.py",
+    "/app/test_reports/pytest/admin_panel.xml"
+  ],
+  "action_items": [
+    "Optional: add <DialogDescription> to admin panel dialogs to silence Radix a11y warnings."
+  ],
+  "critical_code_review_comments": [
+    "admin.py assign_plan grants credits with $inc only when a plan is assigned — correct per spec, but calling the endpoint repeatedly with the same plan will stack credits (no idempotency). Consider warning admin or tracking last_granted_plan_id.",
+    "providers.detect() OpenAI /models path uses timeout=20s but is called inside asyncio.to_thread on the request path — a very slow provider could hold a request thread; acceptable for admin-only usage.",
+    "public /plans endpoint is unauthenticated (intended). Only exposes fields via _plan_public — good, no key/internal leakage."
+  ],
+  "updated_files": ["/app/backend/tests/test_admin_panel.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Super admin: krimagina2025@gmail.com / Admin2026!  |  Normal: agente@watchful.app / Agente2026!",
+  "seed_data_creation": "Test artifacts (TEST_/UITEST_ prefixed plans + providers) are created and deleted within each test run. No residual seed data expected.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend pytest command: `REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env | cut -d= -f2) pytest /app/backend/tests/test_admin_panel.py -o addopts=''` (pytest.ini enables xdist by default which strips env; disabling addopts avoids the issue). All 3 admin tabs and provider flow work via data-testid selectors listed in the spec."
+}

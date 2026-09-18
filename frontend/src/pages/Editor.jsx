@@ -115,7 +115,7 @@ export default function Editor() {
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${photo.original_filename || "watchful"}.png`;
+      a.download = `${photo.original_filename || "editkrimagina"}.png`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {

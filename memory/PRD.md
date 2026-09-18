@@ -70,5 +70,20 @@ Plataforma web/PWA en español para que agentes, agencias y fotógrafos inmobili
 - Descripción del anuncio con IA; detección de estancias; tour 360°.
 - App nativa React + TypeScript.
 
+## Iteración 3 — Panel de administrador (2026-06)
+- [x] Panel admin en `/app/admin`, visible SOLO para super-admin (SUPER_ADMIN_EMAIL=krimagina2025@gmail.com). Gate en frontend (redirige) y backend (403).
+- [x] Sección 1 — Usuarios y planes: CRUD de planes de suscripción (nombre, precio, créditos, periodo, características, destacado, activo). Los planes activos se sincronizan en la landing pública (GET /api/plans → pricing-section). Lista de usuarios con plan/vencimiento/créditos y asignación manual de plan (con concesión de créditos, sin apilar al reasignar el mismo plan).
+- [x] Sección 2 — Consumo por usuario: registro `usage_events` desde ahora (créditos foto vs vídeo + llamadas reales a Gemini; lote de N = N llamadas). Consumo propio del admin separado + totales del resto + tabla por usuario.
+- [x] Sección 3 — Proveedores IA: alta de proveedores (OpenAI-compatible / fal.ai / custom) con URL+key; detección de modelos vía /models (curado para fal), estado válido/sin créditos/clave inválida. Toggles Foto/Vídeo por modelo (Vídeo = "próximamente"). Override de motor por herramienta: cada herramienta de foto puede usar un proveedor+modelo asignado en lugar de Gemini Nano Banana, con vuelta al modelo por defecto. Borrar proveedor limpia sus overrides.
+- Backend nuevos módulos: `admin.py` (rutas), `providers.py` (adaptadores IA). server.py: is_super_admin, log_usage, get_tool_override, enrutado en `_apply_edit`.
+- Testing iteración 3: backend 10/10 pytest + frontend 100% (iteration_7).
+
+## Rebrand (2026-06)
+- [x] App renombrada a "edit KRimagina" en título del navegador, meta, manifest PWA, login, header, footer y nombre de descarga. Logo (KR) añadido como badge en el componente Logo (`/app/frontend/public/logo-krimagina.jpg`) + favicon/apple-touch-icon.
+
+### Pendiente de esta línea (backlog)
+- Checkout de suscripción recurrente con Stripe (los planes hoy se asignan manualmente).
+- IA imagen-a-vídeo real para el toggle "Vídeo" de proveedores (hoy vídeo = ffmpeg local).
+
 ## Credenciales de prueba
 Ver /app/memory/test_credentials.md (admin@watchful.app / Watchful2026!).

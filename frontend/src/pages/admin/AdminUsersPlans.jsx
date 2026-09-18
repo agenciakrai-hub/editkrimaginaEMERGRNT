@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -62,7 +62,9 @@ function PlanDialog({ plan, onSaved }) {
         )}
       </DialogTrigger>
       <DialogContent className="bg-[#1E1A29] border-white/10 text-white max-w-lg">
-        <DialogHeader><DialogTitle className="font-display">{editing ? "Editar plan" : "Crear plan"}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="font-display">{editing ? "Editar plan" : "Crear plan"}</DialogTitle>
+          <DialogDescription className="text-slate-400">Define nombre, precio, créditos y características del plan.</DialogDescription>
+        </DialogHeader>
         <div className="space-y-3 mt-1 max-h-[70vh] overflow-y-auto pr-1">
           <div className="space-y-1.5"><Label className="text-slate-300">Nombre</Label>
             <Input data-testid="plan-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -132,7 +134,9 @@ function AssignPlanDialog({ user, plans, onSaved }) {
         <Button data-testid={`assign-plan-${user.user_id}`} size="sm" variant="ghost" className="h-8 text-xs text-cyan-300 hover:bg-white/10">Asignar plan</Button>
       </DialogTrigger>
       <DialogContent className="bg-[#1E1A29] border-white/10 text-white">
-        <DialogHeader><DialogTitle className="font-display">Plan de {user.email}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="font-display">Plan de {user.email}</DialogTitle>
+          <DialogDescription className="text-slate-400">Asigna un plan y su fecha de vencimiento a este usuario.</DialogDescription>
+        </DialogHeader>
         <div className="space-y-3 mt-1">
           <div className="space-y-1.5"><Label className="text-slate-300">Plan</Label>
             <Select value={planId} onValueChange={setPlanId}>

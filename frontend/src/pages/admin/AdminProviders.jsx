@@ -9,7 +9,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import { Plus, RefreshCw, Trash2, Loader2, Image as ImageIcon, Film, Server } from "lucide-react";
 import { toast } from "sonner";
@@ -58,7 +58,9 @@ function AddProviderDialog({ onSaved }) {
         </Button>
       </DialogTrigger>
       <DialogContent className="bg-[#1E1A29] border-white/10 text-white max-w-lg">
-        <DialogHeader><DialogTitle className="font-display">Nuevo proveedor de IA</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="font-display">Nuevo proveedor de IA</DialogTitle>
+          <DialogDescription className="text-slate-400">La app detectará los modelos disponibles y validará la clave.</DialogDescription>
+        </DialogHeader>
         <div className="space-y-3 mt-1">
           <div className="space-y-1.5"><Label className="text-slate-300">Nombre</Label>
             <Input data-testid="provider-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}

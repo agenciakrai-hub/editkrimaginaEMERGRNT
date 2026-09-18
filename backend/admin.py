@@ -116,8 +116,9 @@ def register_admin_routes(api, db, current_user, action_catalog):
             if not plan:
                 raise HTTPException(status_code=404, detail="Plan no encontrado")
             update = {"plan_id": plan["id"], "plan_name": plan["name"], "plan_expires_at": data.expires_at}
-            # Grant the plan's included credits on assignment.
-            if plan.get("credits"):
+            # Grant the plan's included credits only when the plan actually changes
+            # (re-saving to update the expiry date must not stack credits).
+            if plan.get("credits") and u.get("plan_id") != plan["id"]:
                 await db.users.update_one({"user_id": user_id}, {"$inc": {"credits": plan["credits"]}})
         else:
             update = {"plan_id": None, "plan_name": None, "plan_expires_at": None}
