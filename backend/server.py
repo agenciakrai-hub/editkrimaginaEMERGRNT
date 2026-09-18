@@ -498,7 +498,7 @@ async def edit_photo(photo_id: str, data: EditInput, user: dict = Depends(curren
     await db.photos.update_one({"id": photo_id}, {"$set": {"status": "processing"}})
     try:
         updated = await _apply_edit(photo, data.action, data.options, data.disclosure)
-    except Exception as e:
+    except Exception:
         logger.exception("edit failed")
         if charge > 0:
             await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": charge}})

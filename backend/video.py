@@ -3,6 +3,7 @@ import os
 import asyncio
 import tempfile
 import logging
+from typing import List, Optional
 
 logger = logging.getLogger("watchful.video")
 
@@ -20,7 +21,7 @@ FONT_CANDIDATES = [
 ]
 
 
-def _font():
+def _font() -> Optional[str]:
     for f in FONT_CANDIDATES:
         if os.path.exists(f):
             return f
@@ -33,7 +34,7 @@ FORMATS = {
 }
 
 
-async def _run(args, timeout=180):
+async def _run(args: List[str], timeout: int = 180) -> None:
     if args and args[0] == "ffmpeg":
         args = [FFMPEG_BIN] + list(args[1:])
     proc = await asyncio.create_subprocess_exec(
@@ -57,7 +58,7 @@ def _esc(text: str) -> str:
     return (text or "").replace("\\", "").replace(":", " ").replace("'", "").replace("%", "")[:60]
 
 
-def _motion_vf(motion, w, h, frames, fps):
+def _motion_vf(motion: str, w: int, h: int, frames: int, fps: int) -> str:
     """Return the zoompan/scale filter chain for a given camera motion."""
     bw, bh = int(w * 1.25), int(h * 1.25)
     base = f"scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
@@ -84,7 +85,7 @@ def _motion_vf(motion, w, h, frames, fps):
     return base + zp
 
 
-async def _make_clip(item, out_path, w, h):
+async def _make_clip(item: dict, out_path: str, w: int, h: int) -> None:
     fps = 25
     secs = float(item.get("secs", 3.5))
     motion = item.get("motion", "ken_burns")
@@ -101,13 +102,13 @@ async def _make_clip(item, out_path, w, h):
     ])
 
 
-def _render_title_png(png_path, w, h, title, subtitle):
+def _render_title_png(png_path: str, w: int, h: int, title: Optional[str], subtitle: Optional[str]) -> None:
     """Render the branded title card with Pillow (the bundled ffmpeg lacks drawtext)."""
     from PIL import Image, ImageDraw, ImageFont
     img = Image.new("RGB", (w, h), (11, 10, 16))
     d = ImageDraw.Draw(img)
     font_path = _font()
-    title = (title or "Watchful")[:44]
+    title = (title or "edit KRimagina")[:44]
     if font_path:
         tf = ImageFont.truetype(font_path, int(h * 0.075))
         tb = d.textbbox((0, 0), title, font=tf)
@@ -125,7 +126,7 @@ def _render_title_png(png_path, w, h, title, subtitle):
     img.save(png_path, "PNG")
 
 
-async def _make_title_card(out_path, w, h, secs, title, subtitle):
+async def _make_title_card(out_path: str, w: int, h: int, secs: float, title: Optional[str], subtitle: Optional[str]) -> None:
     png = out_path + ".png"
     await asyncio.to_thread(_render_title_png, png, w, h, title, subtitle)
     fps = 25
@@ -143,7 +144,7 @@ async def _make_title_card(out_path, w, h, secs, title, subtitle):
     ])
 
 
-async def _make_music(out_path, duration):
+async def _make_music(out_path: str, duration: float) -> None:
     # Soft ambient A-minor pad from mixed sine tones, low volume with fades.
     await _run([
         "ffmpeg", "-y",
@@ -158,7 +159,7 @@ async def _make_music(out_path, duration):
     ])
 
 
-async def generate_video(items, out_path, fmt="tour", title=None, subtitle=None, music=True):
+async def generate_video(items: List[dict], out_path: str, fmt: str = "tour", title: Optional[str] = None, subtitle: Optional[str] = None, music: bool = True) -> str:
     """items: list of {path, motion, secs}. Falls back to Ken Burns / format defaults per item."""
     cfg = FORMATS.get(fmt, FORMATS["tour"])
     w, h, default_secs = cfg["w"], cfg["h"], cfg["secs"]
@@ -173,7 +174,7 @@ async def generate_video(items, out_path, fmt="tour", title=None, subtitle=None,
         clips = []
         title_secs = 2.2
         title_clip = os.path.join(tmp, "title.mp4")
-        await _make_title_card(title_clip, w, h, title_secs, title or "Watchful", subtitle)
+        await _make_title_card(title_clip, w, h, title_secs, title or "edit KRimagina", subtitle)
         clips.append(title_clip)
 
         for i, it in enumerate(items):

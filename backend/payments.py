@@ -18,7 +18,7 @@ PACKAGES = {
 }
 
 
-async def grant_credits(db, session_id: str):
+async def grant_credits(db, session_id: str) -> None:
     """Idempotently grant package credits once a transaction is paid."""
     txn = await db.payment_transactions.find_one({"session_id": session_id})
     if not txn or txn.get("payment_status") != "paid" or txn.get("credited"):
