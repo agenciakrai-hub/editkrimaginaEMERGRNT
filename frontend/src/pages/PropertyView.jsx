@@ -73,7 +73,9 @@ export default function PropertyView() {
       if (data.some((v) => v.status === "processing")) {
         setTimeout(loadVideos, 4000);
       }
-    } catch {}
+    } catch (err) {
+      console.error("No se pudieron cargar los videos", err);
+    }
   }, [id]);
 
   const generateVideo = async () => {

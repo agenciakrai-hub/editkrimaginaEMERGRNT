@@ -268,7 +268,7 @@ export default function Editor() {
                 <h4 className="text-sm font-medium text-white mb-2">Ediciones aplicadas</h4>
                 <div className="flex flex-wrap gap-1.5">
                   {photo.edits.map((e, i) => (
-                    <span key={i} className="text-[11px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/20">{e.label}</span>
+                    <span key={`${e.action}-${e.at || i}`} className="text-[11px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/20">{e.label}</span>
                   ))}
                 </div>
               </div>

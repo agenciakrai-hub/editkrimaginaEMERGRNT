@@ -38,7 +38,9 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     try {
       await api.post("/auth/logout");
-    } catch (e) {}
+    } catch (e) {
+      console.error("Error al cerrar sesión", e);
+    }
     clearToken();
     setUser(null);
   };
