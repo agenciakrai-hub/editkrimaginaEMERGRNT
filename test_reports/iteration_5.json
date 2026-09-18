@@ -1,0 +1,26 @@
+{
+  "summary": "Iter 5 regression after cosmetic-only changes (React stable key in Editor edits list, console.error in loadVideos + AuthContext logout catches). Backend pytest 9/9 PASS in ~48s against preview URL: admin login+me+logout, owner (krimagina2025@gmail.com/Owner2026!) login+me returns role=owner credits=999999 unlimited=true, free edit (sky) on admin does NOT deduct credits and pushes an entry into photo.edits, paid edit (twilight) on owner does NOT deduct credits and does NOT 402, video tour end-to-end with 6 photos reaches 'done' and MP4 is served as video/mp4 via /api/files/{storage_path}?token=... while /properties/{id}/videos remained <5s during processing (5 fast probes), /api/payments/packages returns 3 packages, /api/payments/checkout with {lookup_key, origin_url} returns a stripe.com checkout URL. Frontend smoke: admin login via preview URL redirects to /app, dashboard renders 'Mis propiedades' with existing 'UI_Vid11' property, no runtime pageerrors (the two 401s in console are the expected pre-login /api/auth/me probes). Cosmetic fixes confirmed non-regressing.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_regression_iter5.py",
+    "/app/test_reports/pytest/pytest_iter5.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Confirmed: video.py uses asyncio.create_subprocess_exec (not exec()) — end-to-end video generation works, no security concern.",
+    "Confirmed: '_video_sweeper' is scheduled at startup and video listing stays responsive (<5s per call) during processing.",
+    "Owner promotion happens at startup for existing users only (server.py:823-827). If the owner registers AFTER container start, role stays 'user' until next restart — however is_owner() also checks email membership in OWNER_EMAILS at request time, so unlimited-credit behavior still applies. Consider promoting on-the-fly in register/login as a defense-in-depth, or the /auth/me response could still return role='user' which the frontend may misuse. In this iteration owner was seeded before test and /me returned role=owner correctly.",
+    "PropertyView.jsx polling setTimeout leak (raised in iter3/iter4) still not fixed — not in scope this iteration.",
+    "Editor.jsx stable key change (from index to a stable edit id/timestamp) verified indirectly: free-edit API returns photo.edits[] with each entry carrying identifiable fields, so React can key on them without warnings."
+  ],
+  "updated_files": ["/app/backend/tests/test_regression_iter5.py"],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "smoke OK (login + dashboard render, no pageerrors)"},
+  "test_credentials": "admin@watchful.app / Watchful2026! ; owner krimagina2025@gmail.com / Owner2026! (auto-registered by test if missing; startup then promotes to role=owner credits=999999)",
+  "seed_data_creation": "Three ephemeral test properties: TEST_Iter5_Admin (1 JPEG, sky edit), TEST_Iter5_Owner (1 JPEG, twilight paid edit), TEST_Iter5_Video (6 JPEGs, tour). All deleted on teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression suite lives in /app/backend/tests/test_regression_iter5.py — reusable. Run: `REACT_APP_BACKEND_URL=<preview> pytest backend/tests/test_regression_iter5.py -v -s -n 0` (pytest.ini forces xdist so -n 0 needed for serial). Video test uses eta polling on /properties/{id}/videos and probes latency — expects <5s per listing call.",
+  "rca_of_the_issue": "N/A — no regression detected. Both cosmetic changes (Editor stable key + console.error catches) are benign and the underlying flows they touch (Editor edits list rendering, PropertyView video loading, AuthContext logout) still function end-to-end."
+}
