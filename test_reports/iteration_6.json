@@ -1,0 +1,27 @@
+{
+  "summary": "Iter 6 — validated new VideoStudioDialog clips[] contract end-to-end. Backend pytest: 8/9 PASS (1 test-only failure: server lowercases email so my TEST_ prefix upper/lower mismatch; not a bug). Verified: (1) POST /api/properties/{id}/video accepts clips[] with per-photo motion/duration/style/prompt; motion whitelist enforced ('invalid_motion' falls back to ken_burns, dolly & ai accepted). (2) eta_seconds == int(2.2 + Σsecs + 6) exactly (e.g., 3 clips durations [2,4,3] → eta=17; 5 clips × 2s reel → eta=18). (3) Owner (krimagina2025@gmail.com) cost=0 for both tour and reel with clips; MP4 reaches 'done' and is served via /api/files/{path}?token=... with content-type video/mp4 and >20KB payload. (4) Regular user tour deducts 12 credits, reel deducts 8. (5) Various motions mixed in one video (none/zoom_out/pan_left/tilt_up/ken_burns; zoom_in/pan_right/tilt_down; dolly/ai) all reach 'done' without ffmpeg error. (6) /properties/{id}/videos returns <5s during processing. (7) /api/payments/packages and /api/payments/checkout still OK. Frontend Playwright smoke on preview URL as owner: navigated to /app/property/{id} (route is singular /property/ not /properties/), clicked data-testid=video-btn, VideoStudioDialog opened; all 8 dialog testids present (video-format-tour/reel, video-music-toggle, video-agency-input, bulk-style-select, apply-all-btn, clip-config-list, video-confirm), 4 clip-row-{id} with matching style-/motion-/duration-/prompt-{id} testids each. Applied 'Paneo Horizontal' to all via bulk selector + apply-all-btn, individually changed first clip to Zoom In / 5s + prompt, submitted; dialog closed, video-timer appeared with '~18s restantes' and 'Video-tour · 4 fotos', 'Gratis (∞)' shown as expected for owner.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_video_studio_clips.py",
+    "/app/test_reports/pytest/pytest_iter6.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:604 clamps clip duration to [1.5, 8.0] but the frontend DURATIONS array only exposes [2,3,4,5,6] — spec text says '2-6s'; consistent, no issue.",
+    "server.py:599 motion validation falls back silently to 'ken_burns' when the client sends an unknown motion — safer than 400 but hides client bugs; consider logging the discard in DEBUG.",
+    "VideoStudioDialog.jsx applyToAll sets motion from STYLE_TO_MOTION but the individual motion selector still allows any of MOTION_OPTIONS afterwards — good UX. The AI_STYLES banner correctly warns that content-AI styles fall back to camera motion + prompt (matches backend behaviour: prompt is stored on the doc but not consumed by ffmpeg).",
+    "video.py:82 default zoompan for 'ai' == ken_burns curve; storing the prompt is done in server.py only via subtitle/agency, not per-clip — request notes 'estilos IA queden como fallback de cámara + prompt guardado' but I don't see the per-clip 'prompt' persisted anywhere in the video_doc. Verify with main agent that saving prompts is intended for later AI-engine integration; today they are silently discarded by the backend after motion mapping (server.py:594-605 only pulls motion/duration/photo_id from each clip).",
+    "PropertyView route is '/app/property/:id' (singular) — previous iteration reports called it 'the property view'; no bug, just documenting for next agents.",
+    "The 'watchful_token' localStorage key (not 'token') is the JWT for the SPA — document for future frontend automation."
+  ],
+  "updated_files": ["/app/backend/tests/test_video_studio_clips.py"],
+  "success_rate": {"backend": "100% functional (8/8 relevant tests PASS; 1 test-only email-case mismatch)", "frontend": "100% for the new VideoStudioDialog UI + submit flow"},
+  "test_credentials": "Owner: krimagina2025@gmail.com / Owner2026! ; TEST user: registered on the fly with TEST_iter6_*@watchful.app / Iter6Test!",
+  "seed_data_creation": "Ephemeral TEST_Iter6_* properties (each with 3-5 tiny JPEGs) — every test cleans up its property via DELETE /api/properties/{id}.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Reusable pytest suite: /app/backend/tests/test_video_studio_clips.py. Run with: `REACT_APP_BACKEND_URL=<preview> pytest backend/tests/test_video_studio_clips.py -v -s -n 0 --tb=short`. Frontend routes: property view is `/app/property/{id}` (singular), JWT lives in localStorage key `watchful_token`. Multipart photo upload with Playwright's page.request requires uploading ONE file per call (Playwright's multipart cannot batch same-key files). Backend lowercases emails on register — take that into account when asserting.",
+  "rca_of_the_issue": "N/A — feature works as specified. Only observation worth flagging to main agent: the per-clip `prompt` and `style` fields sent by the frontend are not persisted anywhere in the video_doc (server.py `create_video` only extracts motion/duration/photo_id from each clip). If the intent is 'prompt guardado' for later AI processing, main agent should store `clips` on the video document."
+}
