@@ -57,22 +57,44 @@ def _esc(text: str) -> str:
     return (text or "").replace("\\", "").replace(":", " ").replace("'", "").replace("%", "")[:60]
 
 
-async def _make_clip(img_path, out_path, w, h, secs, idx):
-    # Keep the working resolution light (1.25x, not 2x) so zoompan is fast and low-memory on
-    # resource-constrained production nodes, while still avoiding upscaling at max zoom (1.18).
+def _motion_vf(motion, w, h, frames, fps):
+    """Return the zoompan/scale filter chain for a given camera motion."""
     bw, bh = int(w * 1.25), int(h * 1.25)
+    base = f"scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
+    cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+    n = max(frames - 1, 1)
+    if motion == "none":
+        zp = f"zoompan=z=1:d={frames}:x='{cx}':y='{cy}':s={w}x{h}:fps={fps}"
+    elif motion == "zoom_in":
+        zp = f"zoompan=z='min(1.0+0.0016*on,1.20)':d={frames}:x='{cx}':y='{cy}':s={w}x{h}:fps={fps}"
+    elif motion == "zoom_out":
+        zp = f"zoompan=z='max(1.20-0.0016*on,1.0)':d={frames}:x='{cx}':y='{cy}':s={w}x{h}:fps={fps}"
+    elif motion == "dolly":
+        zp = f"zoompan=z='min(1.0+0.0026*on,1.35)':d={frames}:x='{cx}':y='{cy}':s={w}x{h}:fps={fps}"
+    elif motion == "pan_left":
+        zp = f"zoompan=z=1.12:d={frames}:x='(iw-iw/zoom)*(1-on/{n})':y='{cy}':s={w}x{h}:fps={fps}"
+    elif motion == "pan_right":
+        zp = f"zoompan=z=1.12:d={frames}:x='(iw-iw/zoom)*(on/{n})':y='{cy}':s={w}x{h}:fps={fps}"
+    elif motion == "tilt_up":
+        zp = f"zoompan=z=1.12:d={frames}:x='{cx}':y='(ih-ih/zoom)*(1-on/{n})':s={w}x{h}:fps={fps}"
+    elif motion == "tilt_down":
+        zp = f"zoompan=z=1.12:d={frames}:x='{cx}':y='(ih-ih/zoom)*(on/{n})':s={w}x{h}:fps={fps}"
+    else:  # ken_burns, ai, default
+        zp = f"zoompan=z='min(1.0+0.0016*on,1.18)':d={frames}:x='(iw-iw/zoom)*(on/{n})':y='{cy}':s={w}x{h}:fps={fps}"
+    return base + zp
+
+
+async def _make_clip(item, out_path, w, h):
     fps = 25
-    frames = int(secs * fps)
-    zoom_end = 1.18
-    x_expr = "iw/2-(iw/zoom/2)" if idx % 2 == 0 else "(iw-iw/zoom)*(on/{})".format(frames)
+    secs = float(item.get("secs", 3.5))
+    motion = item.get("motion", "ken_burns")
+    frames = max(int(secs * fps), 2)
     vf = (
-        f"scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
-        f"zoompan=z='min(zoom+0.0018,{zoom_end})':d={frames}:x='{x_expr}':"
-        f"y='ih/2-(ih/zoom/2)':s={w}x{h}:fps={fps},setsar=1,"
-        f"fade=t=in:st=0:d=0.4,fade=t=out:st={secs-0.4:.2f}:d=0.4,format=yuv420p"
+        _motion_vf(motion, w, h, frames, fps)
+        + f",setsar=1,fade=t=in:st=0:d=0.4,fade=t=out:st={secs-0.4:.2f}:d=0.4,format=yuv420p"
     )
     await _run([
-        "ffmpeg", "-y", "-loop", "1", "-i", img_path,
+        "ffmpeg", "-y", "-loop", "1", "-i", item["path"],
         "-vf", vf, "-t", f"{secs}", "-r", f"{fps}",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
         out_path,
@@ -136,12 +158,16 @@ async def _make_music(out_path, duration):
     ])
 
 
-async def generate_video(img_paths, out_path, fmt="tour", title=None, subtitle=None, music=True):
+async def generate_video(items, out_path, fmt="tour", title=None, subtitle=None, music=True):
+    """items: list of {path, motion, secs}. Falls back to Ken Burns / format defaults per item."""
     cfg = FORMATS.get(fmt, FORMATS["tour"])
-    w, h, secs = cfg["w"], cfg["h"], cfg["secs"]
-    img_paths = img_paths[: cfg["max_photos"]]
-    if not img_paths:
+    w, h, default_secs = cfg["w"], cfg["h"], cfg["secs"]
+    items = items[: cfg["max_photos"]]
+    if not items:
         raise RuntimeError("no_photos")
+    for it in items:
+        it.setdefault("motion", "ken_burns")
+        it["secs"] = float(it.get("secs") or default_secs)
 
     with tempfile.TemporaryDirectory() as tmp:
         clips = []
@@ -150,9 +176,9 @@ async def generate_video(img_paths, out_path, fmt="tour", title=None, subtitle=N
         await _make_title_card(title_clip, w, h, title_secs, title or "Watchful", subtitle)
         clips.append(title_clip)
 
-        for i, p in enumerate(img_paths):
+        for i, it in enumerate(items):
             clip = os.path.join(tmp, f"clip{i}.mp4")
-            await _make_clip(p, clip, w, h, secs, i)
+            await _make_clip(it, clip, w, h)
             clips.append(clip)
 
         listfile = os.path.join(tmp, "list.txt")
@@ -163,7 +189,7 @@ async def generate_video(img_paths, out_path, fmt="tour", title=None, subtitle=N
         concat = os.path.join(tmp, "concat.mp4")
         await _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listfile, "-c", "copy", concat])
 
-        total = title_secs + secs * len(img_paths)
+        total = title_secs + sum(it["secs"] for it in items)
         if music:
             try:
                 musicfile = os.path.join(tmp, "music.wav")

@@ -88,6 +88,7 @@ class BatchInput(BaseModel):
 class VideoInput(BaseModel):
     format: str = "tour"  # tour | reel
     photo_ids: Optional[List[str]] = None
+    clips: Optional[List[dict]] = None  # [{photo_id, motion, duration, style, prompt}]
     music: bool = True
     agency_name: Optional[str] = None
 
@@ -538,18 +539,18 @@ def _video_public(v: dict) -> dict:
     }
 
 
-async def _process_video(video_id, user_id, storage_paths, fmt, title, subtitle, music, cost):
+async def _process_video(video_id, user_id, items, fmt, title, subtitle, music, cost):
     tmpdir = tempfile.mkdtemp()
     try:
-        local = []
-        for i, p in enumerate(storage_paths):
-            data, _ = await asyncio.to_thread(storage.get_object, p)
+        local_items = []
+        for i, it in enumerate(items):
+            data, _ = await asyncio.to_thread(storage.get_object, it["path"])
             fp = os.path.join(tmpdir, f"src{i}.jpg")
             with open(fp, "wb") as fh:
                 fh.write(data)
-            local.append(fp)
+            local_items.append({"path": fp, "motion": it.get("motion", "ken_burns"), "secs": it.get("secs")})
         out = os.path.join(tmpdir, "out.mp4")
-        await video_gen.generate_video(local, out, fmt=fmt, title=title, subtitle=subtitle, music=music)
+        await video_gen.generate_video(local_items, out, fmt=fmt, title=title, subtitle=subtitle, music=music)
         with open(out, "rb") as fh:
             vbytes = fh.read()
         path = f"{storage.APP_NAME}/videos/{user_id}/{uuid.uuid4()}.mp4"
@@ -568,6 +569,9 @@ async def _process_video(video_id, user_id, storage_paths, fmt, title, subtitle,
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+MOTIONS = {"none", "zoom_in", "zoom_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "ken_burns", "dolly", "ai"}
+
+
 @api.post("/properties/{property_id}/video")
 async def create_video(property_id: str, data: VideoInput, user: dict = Depends(current_user)):
     fmt = data.format if data.format in VIDEO_COSTS else "tour"
@@ -576,11 +580,31 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
         raise HTTPException(status_code=404, detail="Propiedad no encontrada")
 
     query = {"property_id": property_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}
-    if data.photo_ids:
+    if data.clips:
+        query["id"] = {"$in": [c.get("photo_id") for c in data.clips if c.get("photo_id")]}
+    elif data.photo_ids:
         query["id"] = {"$in": data.photo_ids}
     photos = await db.photos.find(query, {"_id": 0}).sort("created_at", 1).to_list(1000)
     if not photos:
         raise HTTPException(status_code=400, detail="No hay fotos para el video")
+    photo_by_id = {p["id"]: p for p in photos}
+
+    default_secs = 3.5 if fmt == "tour" else 2.5
+    items = []
+    if data.clips:
+        for c in data.clips:
+            p = photo_by_id.get(c.get("photo_id"))
+            if not p:
+                continue
+            motion = c.get("motion") if c.get("motion") in MOTIONS else "ken_burns"
+            try:
+                secs = float(c.get("duration") or default_secs)
+            except (TypeError, ValueError):
+                secs = default_secs
+            secs = min(max(secs, 1.5), 8.0)
+            items.append({"path": p.get("current_path") or p["original_path"], "motion": motion, "secs": secs})
+    if not items:
+        items = [{"path": p.get("current_path") or p["original_path"], "motion": "ken_burns", "secs": default_secs} for p in photos]
 
     cost = 0 if is_owner(user) else VIDEO_COSTS[fmt]
     if cost > 0:
@@ -589,9 +613,7 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
             raise HTTPException(status_code=402, detail=f"Necesitas {cost} créditos para generar este video")
         await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": -cost}})
 
-    storage_paths = [p.get("current_path") or p["original_path"] for p in photos]
-    per = 4 if fmt == "tour" else 3
-    eta_seconds = 8 + per * len(storage_paths)
+    eta_seconds = int(2.2 + sum(it["secs"] for it in items) + 6)
     video_doc = {
         "id": str(uuid.uuid4()),
         "user_id": user["user_id"],
@@ -599,13 +621,13 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
         "format": fmt,
         "status": "processing",
         "cost": cost,
-        "photo_count": len(storage_paths),
+        "photo_count": len(items),
         "eta_seconds": eta_seconds,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.videos.insert_one(video_doc)
     subtitle = data.agency_name or prop.get("address") or ""
-    asyncio.create_task(_process_video(video_doc["id"], user["user_id"], storage_paths, fmt, prop["name"], subtitle, data.music, cost))
+    asyncio.create_task(_process_video(video_doc["id"], user["user_id"], items, fmt, prop["name"], subtitle, data.music, cost))
     return {"video_id": video_doc["id"], "cost": cost, "eta_seconds": eta_seconds}
 
 

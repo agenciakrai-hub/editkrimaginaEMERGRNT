@@ -4,6 +4,7 @@ import { api, apiError, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import AuthImage from "@/components/AuthImage";
+import VideoStudioDialog from "@/components/VideoStudioDialog";
 import VideoTimer from "@/components/VideoTimer";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -39,10 +40,15 @@ export default function PropertyView() {
 
   const [videos, setVideos] = useState([]);
   const [videoOpen, setVideoOpen] = useState(false);
-  const [videoFormat, setVideoFormat] = useState("tour");
-  const [music, setMusic] = useState(true);
-  const [agencyName, setAgencyName] = useState("");
-  const VIDEO_COSTS = { tour: 12, reel: 8 };
+
+  const handleVideoStarted = async () => {    try {
+      const me = await api.get("/auth/me");
+      updateCredits(me.data.credits);
+    } catch (e) {
+      console.error("No se pudo actualizar créditos", e);
+    }
+    loadVideos();
+  };
 
   const load = useCallback(async () => {
     try {
@@ -77,23 +83,6 @@ export default function PropertyView() {
       console.error("No se pudieron cargar los videos", err);
     }
   }, [id]);
-
-  const generateVideo = async () => {
-    try {
-      const { data } = await api.post(`/properties/${id}/video`, {
-        format: videoFormat,
-        music,
-        agency_name: agencyName || undefined,
-      });
-      setVideoOpen(false);
-      toast.success("Generando video… te avisaremos al terminar");
-      const me = await api.get("/auth/me");
-      updateCredits(me.data.credits);
-      loadVideos();
-    } catch (err) {
-      toast.error(apiError(err));
-    }
-  };
 
   const MAX_DIM = 2560;
 
@@ -379,51 +368,14 @@ export default function PropertyView() {
         </DialogContent>
       </Dialog>
 
-      {/* Video dialog */}
-      <Dialog open={videoOpen} onOpenChange={setVideoOpen}>
-        <DialogContent className="bg-[#1E1A29] border-white/10 text-white">
-          <DialogHeader>
-            <DialogTitle className="font-display flex items-center gap-2"><Clapperboard className="w-5 h-5 text-cyan-400" /> Generar video</DialogTitle>
-            <DialogDescription className="text-slate-400">Crea un video a partir de las {photos.length} fotos de esta propiedad.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => setVideoFormat("tour")} data-testid="video-format-tour"
-                className={`rounded-xl border p-4 text-left transition-colors ${videoFormat === "tour" ? "border-cyan-500/60 bg-cyan-500/10" : "border-white/10 bg-black/20 hover:border-white/20"}`}>
-                <Monitor className={`w-5 h-5 mb-2 ${videoFormat === "tour" ? "text-cyan-400" : "text-slate-400"}`} />
-                <div className="text-sm font-medium text-white">Video-tour</div>
-                <div className="text-xs text-slate-400">Horizontal 16:9 · web y portales</div>
-                <div className="text-xs text-cyan-300 mt-1 flex items-center gap-1"><Zap className="w-3 h-3" />{VIDEO_COSTS.tour} créditos</div>
-              </button>
-              <button onClick={() => setVideoFormat("reel")} data-testid="video-format-reel"
-                className={`rounded-xl border p-4 text-left transition-colors ${videoFormat === "reel" ? "border-violet-500/60 bg-violet-500/10" : "border-white/10 bg-black/20 hover:border-white/20"}`}>
-                <Smartphone className={`w-5 h-5 mb-2 ${videoFormat === "reel" ? "text-violet-400" : "text-slate-400"}`} />
-                <div className="text-sm font-medium text-white">Reel vertical</div>
-                <div className="text-xs text-slate-400">9:16 · Instagram y TikTok</div>
-                <div className="text-xs text-violet-300 mt-1 flex items-center gap-1"><Zap className="w-3 h-3" />{VIDEO_COSTS.reel} créditos</div>
-              </button>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-slate-300 text-sm">Nombre de la agencia (portada, opcional)</Label>
-              <Input value={agencyName} onChange={(e) => setAgencyName(e.target.value)} data-testid="video-agency-input"
-                placeholder="Tu Agencia Inmobiliaria" className="bg-secondary/60 border-white/10" />
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-black/30 border border-white/10 p-3">
-              <div className="flex items-center gap-2">
-                <Music className="w-4 h-4 text-cyan-400" />
-                <span className="text-sm text-slate-300">Música de fondo</span>
-              </div>
-              <Switch checked={music} onCheckedChange={setMusic} data-testid="video-music-toggle" />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={generateVideo} data-testid="video-confirm"
-              className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
-              Generar · {VIDEO_COSTS[videoFormat]} créditos
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Video studio (per-photo controls) */}
+      <VideoStudioDialog
+        open={videoOpen}
+        onOpenChange={setVideoOpen}
+        photos={photos}
+        propertyId={id}
+        onStarted={handleVideoStarted}
+      />
     </div>
   );
 }
