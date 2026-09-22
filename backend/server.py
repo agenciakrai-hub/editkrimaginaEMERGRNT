@@ -463,8 +463,9 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
         gemini_calls = 1
     if not result_bytes:
         raise RuntimeError("no_image")
-    out_path = f"{storage.APP_NAME}/edits/{photo['user_id']}/{uuid.uuid4()}.png"
-    stored = storage.put_object(out_path, result_bytes, "image/png")
+    result_bytes = imaging.finalize_edit(result_bytes, data)
+    out_path = f"{storage.APP_NAME}/edits/{photo['user_id']}/{uuid.uuid4()}.jpg"
+    stored = storage.put_object(out_path, result_bytes, "image/jpeg")
     action = ai_edit.ACTIONS[action_key]
     disc = action["disclosure_default"] if disclosure is None else disclosure
     edit_entry = {"action": action_key, "label": action["label"], "at": datetime.now(timezone.utc).isoformat()}

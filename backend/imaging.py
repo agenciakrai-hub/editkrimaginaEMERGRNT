@@ -2,7 +2,7 @@
 import io
 import logging
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 logger = logging.getLogger("watchful.imaging")
 
@@ -47,6 +47,32 @@ def _downscale_and_encode(img: "Image.Image") -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=90, optimize=True)
     return buf.getvalue()
+
+
+def finalize_edit(edited: bytes, source: bytes) -> bytes:
+    """Bring an AI-edited image up to the source resolution and deliver a crisp JPEG.
+
+    Nano Banana returns ~1024px images; real-estate delivery needs the original
+    resolution. We upscale (Lanczos) to match the source's long side and apply a
+    light unsharp mask so the result is client-ready.
+    """
+    out = Image.open(io.BytesIO(edited))
+    if out.mode != "RGB":
+        out = out.convert("RGB")
+    try:
+        with Image.open(io.BytesIO(source)) as src:
+            tw, th = src.size
+    except Exception:
+        tw, th = out.size
+    ow, oh = out.size
+    if max(ow, oh) > 0 and max(tw, th) > max(ow, oh):
+        scale = max(tw, th) / max(ow, oh)
+        out = out.resize((max(1, round(ow * scale)), max(1, round(oh * scale))), Image.LANCZOS)
+        out = out.filter(ImageFilter.UnsharpMask(radius=1.6, percent=110, threshold=2))
+    buf = io.BytesIO()
+    out.save(buf, format="JPEG", quality=95, subsampling=0, optimize=True)
+    return buf.getvalue()
+
 
 
 def convert_to_jpeg(data: bytes, ext: str) -> bytes:
