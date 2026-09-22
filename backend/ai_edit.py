@@ -1,13 +1,17 @@
 import os
+import asyncio
 import base64
 import logging
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 
 logger = logging.getLogger(__name__)
 
-# Nano Banana "Pro" gives higher fidelity, sharper detail and fewer hallucinations
-# than the flash model — important for client-ready real-estate photos.
-MODEL = os.environ.get("AI_IMAGE_MODEL", "gemini-3-pro-image-preview")
+# Flash is fast and reliable in production; Pro is used automatically as a fallback
+# (and can be promoted to primary via AI_IMAGE_MODEL when the key balance is healthy).
+MODEL = os.environ.get("AI_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
+# Higher-fidelity fallback used automatically only if the primary model errors out.
+FALLBACK_MODEL = os.environ.get("AI_IMAGE_FALLBACK_MODEL", "gemini-3-pro-image-preview")
+EDIT_TIMEOUT = int(os.environ.get("AI_EDIT_TIMEOUT", "150"))
 
 # Applied to every edit: keep the building/architecture and framing identical.
 GEO_GUARD = (
@@ -155,7 +159,7 @@ def build_prompt(action_key: str, options: dict) -> str:
     return f"{prompt}\n\n{guard}"
 
 
-async def run_edit(image_bytes: bytes, action_key: str, options: dict, session_id: str) -> bytes:
+async def _call_model(model: str, prompt: str, b64: str, session_id: str) -> bytes:
     api_key = os.environ["EMERGENT_LLM_KEY"]
     chat = LlmChat(
         api_key=api_key,
@@ -166,11 +170,32 @@ async def run_edit(image_bytes: bytes, action_key: str, options: dict, session_i
             "to the original scene."
         ),
     )
-    chat.with_model("gemini", MODEL).with_params(modalities=["image", "text"])
-    b64 = base64.b64encode(image_bytes).decode("utf-8")
-    msg = UserMessage(text=build_prompt(action_key, options), file_contents=[ImageContent(b64)])
-    text, images = await chat.send_message_multimodal_response(msg)
+    chat.with_model("gemini", model).with_params(modalities=["image", "text"])
+    msg = UserMessage(text=prompt, file_contents=[ImageContent(b64)])
+    text, images = await asyncio.wait_for(
+        chat.send_message_multimodal_response(msg), timeout=EDIT_TIMEOUT
+    )
     if images:
         return base64.b64decode(images[0]["data"])
-    logger.error("Nano Banana returned no image. text=%s", (text or "")[:120])
+    logger.error("%s returned no image. text=%s", model, (text or "")[:120])
+    return None
+
+
+async def run_edit(image_bytes: bytes, action_key: str, options: dict, session_id: str) -> bytes:
+    prompt = build_prompt(action_key, options)
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    # Primary model first, then fallback so an edit never hard-fails when the
+    # premium model is unavailable, slow or over budget.
+    models = [MODEL] + ([FALLBACK_MODEL] if FALLBACK_MODEL and FALLBACK_MODEL != MODEL else [])
+    last_error = None
+    for i, model in enumerate(models):
+        try:
+            result = await _call_model(model, prompt, b64, f"{session_id}_{i}")
+            if result:
+                return result
+        except Exception as e:
+            last_error = e
+            logger.warning("edit with %s failed: %s", model, str(e)[:200])
+    if last_error:
+        logger.error("all models failed for edit; last error: %s", str(last_error)[:200])
     return None
