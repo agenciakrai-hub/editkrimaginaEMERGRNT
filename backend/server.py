@@ -20,6 +20,7 @@ import auth as auth_utils
 import storage
 import ai_edit
 import imaging
+import local_edit
 import video as video_gen
 import payments as pay
 import providers as ai_providers
@@ -445,6 +446,7 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     used_provider = "gemini"
     used_model = ai_edit.MODEL
     gemini_calls = 1
+    is_local = False
     if override:
         prov, model_id = override
         prompt = ai_edit.build_prompt(action_key, options)
@@ -454,16 +456,25 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
             used_model = model_id
             gemini_calls = 0
         except Exception:
-            logger.exception("provider override failed, falling back to Gemini")
+            logger.exception("provider override failed, falling back to default engine")
             result_bytes = None
+    if not result_bytes and not override and action_key in local_edit.SUPPORTED:
+        # Essential (free) tools run locally — no AI API, no credits, no key balance.
+        result_bytes = await asyncio.to_thread(local_edit.run, action_key, data)
+        used_provider = "local"
+        used_model = "opencv"
+        gemini_calls = 0
+        is_local = True
     if not result_bytes:
         result_bytes = await ai_edit.run_edit(data, action_key, options, session_id=f"edit_{photo['id']}")
         used_provider = "gemini"
         used_model = ai_edit.MODEL
         gemini_calls = 1
+        is_local = False
     if not result_bytes:
         raise RuntimeError("no_image")
-    result_bytes = imaging.finalize_edit(result_bytes, data)
+    if not is_local:
+        result_bytes = imaging.finalize_edit(result_bytes, data)
     out_path = f"{storage.APP_NAME}/edits/{photo['user_id']}/{uuid.uuid4()}.jpg"
     stored = storage.put_object(out_path, result_bytes, "image/jpeg")
     action = ai_edit.ACTIONS[action_key]

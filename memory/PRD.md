@@ -78,6 +78,16 @@ Plataforma web/PWA en español para que agentes, agencias y fotógrafos inmobili
 - Backend nuevos módulos: `admin.py` (rutas), `providers.py` (adaptadores IA). server.py: is_super_admin, log_usage, get_tool_override, enrutado en `_apply_edit`.
 - Testing iteración 3: backend 10/10 pytest + frontend 100% (iteration_7).
 
+## Herramientas gratuitas 100% locales (2026-06) — coste cero
+- [x] Las herramientas ESENCIALES (Mejora automática, Luz y color + HDR, Enderezar perspectiva, Reemplazo de cielo) ahora se procesan LOCALMENTE con OpenCV/Pillow/NumPy en `backend/local_edit.py` — sin llamar a la API de pago de Gemini. **No consumen créditos del usuario NI saldo de la Universal Key** (verificado: provider="local", gemini_calls=0, credits=0). A resolución nativa completa.
+  - auto = enderezar + white balance + tono + CLAHE + saturación + nitidez.
+  - light = white balance + HDR/CLAHE + tono + pop.
+  - straighten = deskew por líneas + keystone conservador.
+  - sky = recoloreo azul solo de cielo REAL (test de "frialdad" b>r para no teñir techos/paredes; en interiores hace fallback a mejora de luz).
+- [x] Enrutado en `server._apply_edit`: si hay override de admin → proveedor IA (de pago); si es acción esencial → local (gratis); resto (premium) → Gemini (de pago).
+- Dependencia añadida: `opencv-python-headless` (requirements.txt).
+- Premium (staging, twilight, quitar objetos, window pull, césped, upscale) siguen usando IA de pago (Gemini flash + respaldo Pro).
+
 ## Calidad de edición IA (2026-06)
 - [x] Anti-alucinación: prompts estrictos (la "Mejora automática" ya no inventa ventanas/cielos; herramientas de ajuste no añaden/quitan objetos; las de contenido preservan la arquitectura). `ai_edit.py` GEO_GUARD/STRICT_GUARD.
 - [x] Resolución client-ready: `imaging.finalize_edit()` sube la salida de Nano Banana (~1024px) a la resolución del original (hasta 2560px) con Lanczos + unsharp y entrega JPEG calidad 95 (≈4-6× más píxeles). Aplicado en `server._apply_edit` (motor por defecto y proveedores).
