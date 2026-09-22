@@ -29,8 +29,8 @@ def _font() -> Optional[str]:
 
 
 FORMATS = {
-    "tour": {"w": 1920, "h": 1080, "secs": 3.5, "max_photos": 30},
-    "reel": {"w": 1080, "h": 1920, "secs": 2.5, "max_photos": 8},
+    "tour": {"w": 1280, "h": 720, "secs": 3.5, "max_photos": 30},
+    "reel": {"w": 720, "h": 1280, "secs": 2.5, "max_photos": 8},
 }
 
 
@@ -60,7 +60,7 @@ def _esc(text: str) -> str:
 
 def _motion_vf(motion: str, w: int, h: int, frames: int, fps: int) -> str:
     """Return the zoompan/scale filter chain for a given camera motion."""
-    bw, bh = int(w * 1.25), int(h * 1.25)
+    bw, bh = int(w * 1.1), int(h * 1.1)
     base = f"scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
     cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
     n = max(frames - 1, 1)
@@ -97,7 +97,8 @@ async def _make_clip(item: dict, out_path: str, w: int, h: int) -> None:
     await _run([
         "ffmpeg", "-y", "-loop", "1", "-i", item["path"],
         "-vf", vf, "-t", f"{secs}", "-r", f"{fps}",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p",
+        "-threads", "2",
         out_path,
     ])
 
@@ -139,7 +140,8 @@ async def _make_title_card(out_path: str, w: int, h: int, secs: float, title: Op
     await _run([
         "ffmpeg", "-y", "-loop", "1", "-i", png,
         "-vf", vf, "-t", f"{secs}", "-r", f"{fps}",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p",
+        "-threads", "2",
         out_path,
     ])
 
@@ -188,7 +190,7 @@ async def generate_video(items: List[dict], out_path: str, fmt: str = "tour", ti
                 f.write(f"file '{c}'\n")
 
         concat = os.path.join(tmp, "concat.mp4")
-        await _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listfile, "-c", "copy", concat])
+        await _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listfile, "-c", "copy", "-threads", "2", concat])
 
         total = title_secs + sum(it["secs"] for it in items)
         if music:
