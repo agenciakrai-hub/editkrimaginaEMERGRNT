@@ -159,7 +159,7 @@ export default function Landing() {
                 <p className="mt-1 text-sm text-cyan-300 flex items-center gap-1.5"><Zap className="w-4 h-4 fill-cyan-300" /> {p.credits} créditos incluidos</p>
                 <ul className="mt-5 space-y-2.5">
                   {(p.features || []).map((f, idx) => (
-                    <li key={idx} className="flex items-start gap-2 text-sm text-slate-300">
+                    <li key={`${f}-${idx}`} className="flex items-start gap-2 text-sm text-slate-300">
                       <Check className="w-4 h-4 text-cyan-400 mt-0.5 shrink-0" /> {f}
                     </li>
                   ))}

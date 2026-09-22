@@ -210,7 +210,7 @@ export default function AdminUsersPlans() {
                 </div>
               </div>
               <ul className="mt-3 space-y-1">
-                {(p.features || []).map((f, i) => <li key={i} className="text-sm text-slate-400">· {f}</li>)}
+                {(p.features || []).map((f, i) => <li key={`${f}-${i}`} className="text-sm text-slate-400">· {f}</li>)}
               </ul>
             </div>
           ))}
