@@ -11,6 +11,7 @@ import Dashboard from "@/pages/Dashboard";
 import PropertyView from "@/pages/PropertyView";
 import Editor from "@/pages/Editor";
 import Admin from "@/pages/Admin";
+import Settings from "@/pages/Settings";
 import PaymentSuccess from "@/pages/PaymentSuccess";
 import PaymentCancel from "@/pages/PaymentCancel";
 
@@ -55,6 +56,14 @@ function AppRouter() {
         element={
           <ProtectedRoute>
             <Admin />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/settings"
+        element={
+          <ProtectedRoute>
+            <Settings />
           </ProtectedRoute>
         }
       />

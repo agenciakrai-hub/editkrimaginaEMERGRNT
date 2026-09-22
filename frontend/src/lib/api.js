@@ -27,6 +27,18 @@ export const fileUrl = (path) => {
   return `${API}/files/${path}?token=${encodeURIComponent(token || "")}`;
 };
 
+// Build a download URL for a photo at a portal preset, optional watermark.
+export const exportUrl = (photoId, preset = "original", watermark = false) => {
+  const token = getToken();
+  return `${API}/photos/${photoId}/export?preset=${preset}&watermark=${watermark ? "true" : "false"}&token=${encodeURIComponent(token || "")}`;
+};
+
+// Build a ZIP download URL for all photos of a property.
+export const downloadAllUrl = (propertyId, preset = "original", watermark = false) => {
+  const token = getToken();
+  return `${API}/properties/${propertyId}/download-all?preset=${preset}&watermark=${watermark ? "true" : "false"}&token=${encodeURIComponent(token || "")}`;
+};
+
 export function apiError(err, fallback = "Algo salió mal. Inténtalo de nuevo.") {
   const detail = err?.response?.data?.detail;
   if (detail == null) return err?.message || fallback;

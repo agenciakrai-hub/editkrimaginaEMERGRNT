@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import Logo from "@/components/Logo";
 import BuyCreditsDialog from "@/components/BuyCreditsDialog";
-import { Zap, LogOut, LayoutGrid, Plus, ShieldCheck } from "lucide-react";
+import { Zap, LogOut, LayoutGrid, Plus, ShieldCheck, Stamp } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,6 +66,13 @@ export default function Header({ actions }) {
                     className="cursor-pointer focus:bg-white/10"
                   >
                     <LayoutGrid className="w-4 h-4 mr-2" /> Mis propiedades
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    data-testid="menu-settings"
+                    onClick={() => navigate("/app/settings")}
+                    className="cursor-pointer focus:bg-white/10"
+                  >
+                    <Stamp className="w-4 h-4 mr-2" /> Ajustes / Marca de agua
                   </DropdownMenuItem>
                   {user.is_super_admin && (
                     <DropdownMenuItem

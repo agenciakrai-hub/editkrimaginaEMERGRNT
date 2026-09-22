@@ -175,31 +175,56 @@ def _sky_mask(bgr: np.ndarray) -> np.ndarray:
     return mask
 
 
+def _make_sky(h: int, w: int) -> np.ndarray:
+    """Procedural realistic blue sky: vertical gradient + soft clouds (BGR)."""
+    # Vertical gradient: deep blue at top -> light blue near the horizon.
+    top = np.array([170, 120, 60], dtype=np.float32)      # BGR deep blue
+    bottom = np.array([235, 206, 165], dtype=np.float32)   # BGR light blue
+    t = np.linspace(0, 1, h, dtype=np.float32)[:, None, None]
+    grad = (top[None, None, :] * (1 - t) + bottom[None, None, :] * t)
+    sky = np.repeat(grad, w, axis=1)
+    # Soft procedural clouds via upscaled low-frequency noise.
+    small = np.random.rand(max(2, h // 40), max(2, w // 40)).astype(np.float32)
+    clouds = cv2.resize(small, (w, h), interpolation=cv2.INTER_CUBIC)
+    clouds = cv2.GaussianBlur(clouds, (0, 0), max(6, w // 120))
+    clouds = np.clip((clouds - 0.55) * 3.0, 0, 1)          # keep only brighter puffs
+    clouds *= np.clip(1.0 - t[..., 0], 0.25, 1.0)          # more clouds near horizon
+    white = np.array([255, 255, 255], dtype=np.float32)
+    sky = sky * (1 - clouds[..., None]) + white[None, None, :] * clouds[..., None]
+    return np.clip(sky, 0, 255).astype(np.uint8)
+
+
 def sky_replace(data: bytes) -> bytes:
-    """Turn a dull/grey sky blue by recoloring the detected sky region (free, no AI)."""
+    """Replace a detected real sky with a realistic blue sky (free, no AI). Interiors untouched."""
     bgr = _to_bgr(data)
     h, w = bgr.shape[:2]
     mask = _sky_mask(bgr)
     if mask.max() == 0 or (mask > 128).sum() < (h * w * 0.02):
-        # No clear sky detected: just apply the free light/color pass.
-        return light_color(data)
+        return light_color(data)  # no real sky -> just enhance light/color
     m = (mask.astype(np.float32) / 255.0)[..., None]
-
-    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
-    v = hsv[..., 2]
-    # Vertical gradient: deeper blue at the top, lighter near the horizon.
-    grad = np.linspace(118, 104, h).astype(np.float32)[:, None]  # OpenCV hue for blue
-    new_h = np.repeat(grad, w, axis=1)
-    # More saturation where the sky is darker/higher; keep bright areas soft.
-    new_s = np.clip((255.0 - v) * 0.65 + 40.0, 30, 170)
-    new_v = np.clip(v * 0.98 + 6.0, 0, 255)
-    sky_hsv = np.stack([new_h, new_s, new_v], axis=-1)
-    sky_bgr = cv2.cvtColor(sky_hsv.astype(np.uint8), cv2.COLOR_HSV2BGR).astype(np.float32)
-
-    out = bgr.astype(np.float32) * (1 - m) + sky_bgr * m
-    out = out.astype(np.uint8)
+    sky = _make_sky(h, w).astype(np.float32)
+    # Preserve a little of the original luminance so edges/clouds blend naturally.
+    orig = bgr.astype(np.float32)
+    sky = sky * 0.9 + orig * 0.1
+    out = (orig * (1 - m) + sky * m).astype(np.uint8)
     out = _sharpen(out, 0.35)
     return _to_jpeg(out)
+
+
+def inpaint(data: bytes, mask_bytes: bytes) -> bytes:
+    """Remove painted areas (white in mask) by content-aware fill (free, no AI)."""
+    bgr = _to_bgr(data)
+    h, w = bgr.shape[:2]
+    mimg = Image.open(io.BytesIO(mask_bytes)).convert("L")
+    if mimg.size != (w, h):
+        mimg = mimg.resize((w, h), Image.NEAREST)
+    mask = np.array(mimg)
+    mask = (mask > 40).astype(np.uint8) * 255
+    if mask.sum() == 0:
+        return _to_jpeg(bgr)
+    mask = cv2.dilate(mask, np.ones((5, 5), np.uint8), iterations=1)
+    result = cv2.inpaint(bgr, mask, 4, cv2.INPAINT_TELEA)
+    return _to_jpeg(result)
 
 
 def auto(data: bytes) -> bytes:

@@ -1,13 +1,17 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { api, apiError, fileUrl } from "@/lib/api";
+import { api, apiError, fileUrl, exportUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import BeforeAfterSlider from "@/components/BeforeAfterSlider";
+import EraserDialog from "@/components/EraserDialog";
 import Logo from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
@@ -28,6 +32,13 @@ const STYLES = [
   { key: "minimal", label: "Minimalista" },
   { key: "clasico", label: "Clásico" },
 ];
+const EXPORT_PRESETS = [
+  { key: "original", label: "Original (máxima calidad)" },
+  { key: "idealista", label: "Idealista · 2048×1536" },
+  { key: "fotocasa", label: "Fotocasa · 2000×1500" },
+  { key: "zillow", label: "Zillow · 2048×1536" },
+  { key: "mls", label: "MLS · 1024×768" },
+];
 
 export default function Editor() {
   const { id, photoId } = useParams();
@@ -41,6 +52,17 @@ export default function Editor() {
   const [confirmAction, setConfirmAction] = useState(null);
   const [style, setStyle] = useState("nordico");
   const [disclosure, setDisclosure] = useState(true);
+  const [eraserOpen, setEraserOpen] = useState(false);
+  const [wmOnExport, setWmOnExport] = useState(false);
+
+  const doExport = (preset) => {
+    const a = document.createElement("a");
+    a.href = exportUrl(photoId, preset, wmOnExport && !!user?.watermark?.enabled);
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
 
   const load = useCallback(async () => {
     try {
@@ -110,17 +132,7 @@ export default function Editor() {
   };
 
   const download = async () => {
-    try {
-      const res = await api.get(`/files/${photo.current_path}`, { responseType: "blob" });
-      const url = URL.createObjectURL(res.data);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${photo.original_filename || "editkrimagina"}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      toast.error(apiError(err));
-    }
+    doExport("original");
   };
 
   if (!photo) {
@@ -180,10 +192,35 @@ export default function Editor() {
               <Undo2 className="w-4 h-4 sm:mr-1.5" /> <span className="hidden sm:inline">Restaurar</span>
             </Button>
           )}
-          <Button onClick={download} size="sm" data-testid="download-btn"
-            className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
-            <Download className="w-4 h-4 sm:mr-1.5" /> <span className="hidden sm:inline">Descargar</span>
+          <Button onClick={() => setEraserOpen(true)} variant="outline" size="sm" data-testid="open-eraser-btn"
+            className="rounded-full border-white/15 bg-white/5 hover:bg-white/10 text-white">
+            <Eraser className="w-4 h-4 sm:mr-1.5" /> <span className="hidden sm:inline">Borrador</span>
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" data-testid="download-btn"
+                className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
+                <Download className="w-4 h-4 sm:mr-1.5" /> <span className="hidden sm:inline">Descargar</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="bg-[#1E1A29] border-white/10 text-white w-60">
+              {user?.watermark?.enabled && user?.watermark?.logo_path && (
+                <>
+                  <DropdownMenuItem data-testid="toggle-wm-export" onClick={(e) => { e.preventDefault(); setWmOnExport((v) => !v); }}
+                    className="cursor-pointer focus:bg-white/10 justify-between">
+                    <span>Marca de agua</span>
+                    <span className={wmOnExport ? "text-cyan-300" : "text-slate-500"}>{wmOnExport ? "ON" : "OFF"}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="bg-white/10" />
+                </>
+              )}
+              <DropdownMenuLabel className="text-slate-400 text-xs">Tamaño / portal</DropdownMenuLabel>
+              {EXPORT_PRESETS.map((p) => (
+                <DropdownMenuItem key={p.key} data-testid={`export-${p.key}`} onClick={() => doExport(p.key)}
+                  className="cursor-pointer focus:bg-white/10">{p.label}</DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -338,6 +375,13 @@ export default function Editor() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <EraserDialog
+        open={eraserOpen}
+        onOpenChange={setEraserOpen}
+        photo={photo}
+        onDone={(p) => { setPhoto(p); setCompare(true); }}
+      />
     </div>
   );
 }

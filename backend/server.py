@@ -4,6 +4,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 import os
+import io
 import uuid
 import asyncio
 import logging
@@ -146,6 +147,23 @@ class CheckoutInput(BaseModel):
     origin_url: str
 
 
+class WatermarkInput(BaseModel):
+    enabled: Optional[bool] = None
+    position: Optional[str] = None
+    opacity: Optional[float] = None
+    scale: Optional[float] = None
+
+
+WATERMARK_DEFAULTS = {"enabled": False, "position": "bottom-right", "opacity": 0.75, "scale": 0.18, "logo_path": None}
+EXPORT_PRESETS = {
+    "original": None,
+    "idealista": (2048, 1536),
+    "fotocasa": (2000, 1500),
+    "zillow": (2048, 1536),
+    "mls": (1024, 768),
+}
+
+
 VIDEO_COSTS = {"tour": 12, "reel": 8}
 
 
@@ -172,6 +190,7 @@ def public_user(user: dict) -> dict:
         "is_super_admin": is_super_admin(user),
         "plan_name": user.get("plan_name"),
         "plan_expires_at": user.get("plan_expires_at"),
+        "watermark": {**WATERMARK_DEFAULTS, **(user.get("watermark") or {})},
     }
 
 
@@ -521,6 +540,158 @@ async def edit_photo(photo_id: str, data: EditInput, user: dict = Depends(curren
     return {"photo": _photo_public(updated), "credits": newbal.get("credits", 0)}
 
 
+# ---------- Watermark settings ----------
+@api.get("/settings/watermark")
+async def get_watermark(user: dict = Depends(current_user)):
+    return {**WATERMARK_DEFAULTS, **(user.get("watermark") or {})}
+
+
+@api.put("/settings/watermark")
+async def update_watermark(data: WatermarkInput, user: dict = Depends(current_user)):
+    wm = {**WATERMARK_DEFAULTS, **(user.get("watermark") or {})}
+    for k, v in data.dict(exclude_none=True).items():
+        wm[k] = v
+    wm["opacity"] = max(0.1, min(1.0, float(wm["opacity"])))
+    wm["scale"] = max(0.05, min(0.5, float(wm["scale"])))
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"watermark": wm}})
+    return wm
+
+
+@api.post("/settings/watermark/logo")
+async def upload_watermark_logo(file: UploadFile = File(...), user: dict = Depends(current_user)):
+    ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "png").lower()
+    if ext not in ("png", "jpg", "jpeg", "webp"):
+        raise HTTPException(status_code=400, detail="Usa PNG (con transparencia), JPG o WEBP")
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="El logo supera 8MB")
+    path = f"{storage.APP_NAME}/watermarks/{user['user_id']}/logo.png"
+    stored = storage.put_object(path, data, "image/png")
+    wm = {**WATERMARK_DEFAULTS, **(user.get("watermark") or {}), "logo_path": stored["path"], "enabled": True}
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"watermark": wm}})
+    return wm
+
+
+# ---------- Export with portal presets (+ optional watermark) ----------
+@api.get("/photos/{photo_id}/export")
+async def export_photo(photo_id: str, request: Request, preset: str = "original",
+                       watermark: bool = False, token: str = Query(None)):
+    tok = auth_utils.extract_token(request, query_token=token)
+    user = await auth_utils.resolve_user(db, tok)
+    if not user:
+        raise HTTPException(status_code=401, detail="No autenticado")
+    photo = await db.photos.find_one({"id": photo_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}, {"_id": 0})
+    if not photo:
+        raise HTTPException(status_code=404, detail="Foto no encontrada")
+    if preset not in EXPORT_PRESETS:
+        raise HTTPException(status_code=400, detail="Preset no válido")
+    data, _ = await asyncio.to_thread(storage.get_object, photo.get("current_path") or photo["original_path"])
+    wm = {**WATERMARK_DEFAULTS, **(user.get("watermark") or {})}
+    if watermark and wm.get("logo_path"):
+        try:
+            logo, _ = await asyncio.to_thread(storage.get_object, wm["logo_path"])
+            data = await asyncio.to_thread(imaging.apply_watermark, data, logo, wm["position"], wm["opacity"], wm["scale"])
+        except Exception:
+            logger.exception("watermark apply failed")
+    data = await asyncio.to_thread(imaging.resize_preset, data, EXPORT_PRESETS[preset])
+    base = (photo.get("original_filename") or "editkrimagina").rsplit(".", 1)[0]
+    fname = f"{base}_{preset}.jpg"
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+# ---------- Download ALL project photos as a ZIP ----------
+def _build_zip(items: list) -> bytes:
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, content in items:
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+@api.get("/properties/{property_id}/download-all")
+async def download_all_photos(property_id: str, request: Request, preset: str = "original",
+                              watermark: bool = False, token: str = Query(None)):
+    tok = auth_utils.extract_token(request, query_token=token)
+    user = await auth_utils.resolve_user(db, tok)
+    if not user:
+        raise HTTPException(status_code=401, detail="No autenticado")
+    prop = await db.properties.find_one({"id": property_id, "user_id": user["user_id"]})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+    if preset not in EXPORT_PRESETS:
+        raise HTTPException(status_code=400, detail="Preset no válido")
+    photos = await db.photos.find(
+        {"property_id": property_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}, {"_id": 0}
+    ).sort("created_at", 1).to_list(1000)
+    if not photos:
+        raise HTTPException(status_code=400, detail="No hay fotos para descargar")
+
+    wm = {**WATERMARK_DEFAULTS, **(user.get("watermark") or {})}
+    logo_bytes = None
+    if watermark and wm.get("logo_path"):
+        try:
+            logo_bytes, _ = await asyncio.to_thread(storage.get_object, wm["logo_path"])
+        except Exception:
+            logo_bytes = None
+
+    def _process_all():
+        items, used = [], set()
+        for idx, p in enumerate(photos, 1):
+            try:
+                raw, _ = storage.get_object(p.get("current_path") or p["original_path"])
+                if logo_bytes:
+                    raw = imaging.apply_watermark(raw, logo_bytes, wm["position"], wm["opacity"], wm["scale"])
+                raw = imaging.resize_preset(raw, EXPORT_PRESETS[preset])
+                base = (p.get("original_filename") or f"foto_{idx}").rsplit(".", 1)[0]
+                name = f"{base}.jpg"
+                n = 1
+                while name in used:
+                    name = f"{base}_{n}.jpg"
+                    n += 1
+                used.add(name)
+                items.append((name, raw))
+            except Exception:
+                logger.exception("zip item failed for %s", p.get("id"))
+        return _build_zip(items)
+
+    zip_bytes = await asyncio.to_thread(_process_all)
+    safe = "".join(c for c in (prop["name"] or "proyecto") if c.isalnum() or c in " -_").strip() or "proyecto"
+    return Response(content=zip_bytes, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{safe}.zip"'})
+
+
+# ---------- Local free object removal (brush inpaint) ----------
+@api.post("/photos/{photo_id}/inpaint")
+async def inpaint_photo(photo_id: str, request: Request, user: dict = Depends(current_user)):
+    photo = await db.photos.find_one({"id": photo_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}, {"_id": 0})
+    if not photo:
+        raise HTTPException(status_code=404, detail="Foto no encontrada")
+    body = await request.json()
+    mask_b64 = (body or {}).get("mask", "")
+    if not mask_b64:
+        raise HTTPException(status_code=400, detail="Falta la máscara")
+    import base64
+    try:
+        mask_bytes = base64.b64decode(mask_b64.split(",", 1)[-1])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Máscara no válida")
+    src, _ = await asyncio.to_thread(storage.get_object, photo.get("current_path") or photo["original_path"])
+    try:
+        result = await asyncio.to_thread(local_edit.inpaint, src, mask_bytes)
+    except Exception:
+        logger.exception("inpaint failed")
+        raise HTTPException(status_code=500, detail="No se pudo borrar el objeto")
+    out_path = f"{storage.APP_NAME}/edits/{user['user_id']}/{uuid.uuid4()}.jpg"
+    stored = await asyncio.to_thread(storage.put_object, out_path, result, "image/jpeg")
+    edit_entry = {"action": "spot_remove", "label": "Borrador (local)", "at": datetime.now(timezone.utc).isoformat()}
+    await db.photos.update_one({"id": photo_id}, {"$set": {"current_path": stored["path"], "status": "ready"}, "$push": {"edits": edit_entry}})
+    await log_usage(user["user_id"], "photo", "spot_remove", 0, 0, "local", "opencv")
+    updated = await db.photos.find_one({"id": photo_id}, {"_id": 0})
+    return {"photo": _photo_public(updated)}
+
+
 # ---------- Batch jobs ----------
 async def _process_batch(job_id: str, user_id: str, photo_ids: List[str], action_key: str, options: dict, disclosure, unit_cost: int):
     for pid in photo_ids:
@@ -624,12 +795,28 @@ def _video_public(v: dict) -> dict:
     }
 
 
-async def _process_video(video_id, user_id, items, fmt, title, subtitle, music, cost):
+async def _process_video(video_id, user_id, items, fmt, title, subtitle, music, cost, watermark=None):
     tmpdir = tempfile.mkdtemp()
     try:
+        logo_bytes = None
+        if watermark and watermark.get("enabled") and watermark.get("logo_path"):
+            try:
+                logo_bytes, _ = await asyncio.to_thread(storage.get_object, watermark["logo_path"])
+            except Exception:
+                logo_bytes = None
         local_items = []
         for i, it in enumerate(items):
             data, _ = await asyncio.to_thread(storage.get_object, it["path"])
+            if logo_bytes:
+                try:
+                    data = await asyncio.to_thread(
+                        imaging.apply_watermark, data, logo_bytes,
+                        watermark.get("position", "bottom-right"),
+                        float(watermark.get("opacity", 0.75)),
+                        float(watermark.get("scale", 0.18)),
+                    )
+                except Exception:
+                    logger.exception("video watermark failed")
             fp = os.path.join(tmpdir, f"src{i}.jpg")
             with open(fp, "wb") as fh:
                 fh.write(data)
@@ -713,7 +900,8 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
     }
     await db.videos.insert_one(video_doc)
     subtitle = data.agency_name or prop.get("address") or ""
-    asyncio.create_task(_process_video(video_doc["id"], user["user_id"], items, fmt, prop["name"], subtitle, data.music, cost))
+    watermark = {**WATERMARK_DEFAULTS, **(user.get("watermark") or {})}
+    asyncio.create_task(_process_video(video_doc["id"], user["user_id"], items, fmt, prop["name"], subtitle, data.music, cost, watermark))
     return {"video_id": video_doc["id"], "cost": cost, "eta_seconds": eta_seconds}
 
 

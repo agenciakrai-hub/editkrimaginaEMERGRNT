@@ -78,6 +78,14 @@ Plataforma web/PWA en español para que agentes, agencias y fotógrafos inmobili
 - Backend nuevos módulos: `admin.py` (rutas), `providers.py` (adaptadores IA). server.py: is_super_admin, log_usage, get_tool_override, enrutado en `_apply_edit`.
 - Testing iteración 3: backend 10/10 pytest + frontend 100% (iteration_7).
 
+## Exportación, marca de agua y borrador (2026-06)
+- [x] **Descargar todas (ZIP)**: `GET /api/properties/{id}/download-all?preset=&watermark=` empaqueta todas las fotos del proyecto en un ZIP. Botón desplegable en PropertyView con presets de portal + "con marca de agua".
+- [x] **Presets de portales**: `GET /api/photos/{id}/export?preset=` (Original, Idealista 2048×1536, Fotocasa 2000×1500, Zillow 2048×1536, MLS 1024×768). Desplegable "Descargar" en el Editor. `imaging.resize_preset` (fit, sin ampliar).
+- [x] **Marca de agua por usuario**: sube logo en Ajustes (`/app/settings`), posición/opacidad/tamaño. Se aplica en fotos al exportar (toggle) y en vídeos al generarlos. Endpoints `/api/settings/watermark` (GET/PUT + /logo). `imaging.apply_watermark`.
+- [x] **Borrador gratis (quitar objetos local)**: pincel en el Editor → `POST /api/photos/{id}/inpaint` con máscara → `cv2.inpaint` (Telea). Gratis, sin IA. Componente `EraserDialog.jsx`.
+- [x] **Cielo Pro gratis**: `local_edit.sky_replace` mejorado con cielo azul procedural (degradado + nubes), solo si detecta cielo real (test de frialdad) para no tocar interiores.
+- Rutas/UX: Header → "Ajustes / Marca de agua". Todo probado por curl (backend) + capturas (frontend).
+
 ## Herramientas gratuitas 100% locales (2026-06) — coste cero
 - [x] Las herramientas ESENCIALES (Mejora automática, Luz y color + HDR, Enderezar perspectiva, Reemplazo de cielo) ahora se procesan LOCALMENTE con OpenCV/Pillow/NumPy en `backend/local_edit.py` — sin llamar a la API de pago de Gemini. **No consumen créditos del usuario NI saldo de la Universal Key** (verificado: provider="local", gemini_calls=0, credits=0). A resolución nativa completa.
   - auto = enderezar + white balance + tono + CLAHE + saturación + nitidez.

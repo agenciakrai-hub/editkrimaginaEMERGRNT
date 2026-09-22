@@ -1,12 +1,15 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { api, apiError, fileUrl } from "@/lib/api";
+import { api, apiError, fileUrl, downloadAllUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/Header";
 import AuthImage from "@/components/AuthImage";
 import VideoStudioDialog from "@/components/VideoStudioDialog";
 import VideoTimer from "@/components/VideoTimer";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -23,9 +26,27 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+const PORTAL_PRESETS = [
+  { key: "original", label: "Original (máxima calidad)" },
+  { key: "idealista", label: "Idealista · 2048×1536" },
+  { key: "fotocasa", label: "Fotocasa · 2000×1500" },
+  { key: "zillow", label: "Zillow · 2048×1536" },
+  { key: "mls", label: "MLS · 1024×768" },
+];
+
 export default function PropertyView() {
   const { id } = useParams();
   const navigate = useNavigate();
+
+  const downloadZip = (preset, watermark) => {
+    const a = document.createElement("a");
+    a.href = downloadAllUrl(id, preset, watermark);
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast.success("Preparando la descarga…");
+  };
   const { updateCredits, refresh } = useAuth();
   const fileRef = useRef(null);
   const [prop, setProp] = useState(null);
@@ -222,6 +243,28 @@ export default function PropertyView() {
               variant="outline" className="rounded-full border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200">
               <Clapperboard className="w-4 h-4 mr-1.5" /> Generar video
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button disabled={!photos.length} data-testid="download-all-btn"
+                  variant="outline" className="rounded-full border-white/15 bg-white/5 hover:bg-white/10 text-white">
+                  <Download className="w-4 h-4 mr-1.5" /> Descargar todas
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="bg-[#1E1A29] border-white/10 text-white w-64">
+                <DropdownMenuLabel className="text-slate-400 text-xs">Tamaño / portal (ZIP)</DropdownMenuLabel>
+                {PORTAL_PRESETS.map((p) => (
+                  <DropdownMenuItem key={p.key} data-testid={`dl-all-${p.key}`}
+                    onClick={() => downloadZip(p.key, false)} className="cursor-pointer focus:bg-white/10">
+                    {p.label}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator className="bg-white/10" />
+                <DropdownMenuItem data-testid="dl-all-watermark"
+                  onClick={() => downloadZip("original", true)} className="cursor-pointer focus:bg-white/10 text-cyan-300">
+                  Original · con mi marca de agua
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button onClick={() => fileRef.current?.click()} disabled={uploading} data-testid="upload-btn"
               className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
               {uploading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Upload className="w-4 h-4 mr-1.5" />}

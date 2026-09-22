@@ -75,6 +75,45 @@ def finalize_edit(edited: bytes, source: bytes) -> bytes:
 
 
 
+def resize_preset(data: bytes, target: tuple) -> bytes:
+    """Resize to fit within target (w,h) preserving aspect (never upscales). target None -> original."""
+    img = Image.open(io.BytesIO(data))
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    if target:
+        img.thumbnail((target[0], target[1]), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=95, subsampling=0, optimize=True)
+    return buf.getvalue()
+
+
+def apply_watermark(data: bytes, logo_bytes: bytes, position: str = "bottom-right",
+                    opacity: float = 0.75, scale: float = 0.18) -> bytes:
+    """Overlay an agency logo onto the image. Returns JPEG bytes."""
+    base = Image.open(io.BytesIO(data)).convert("RGBA")
+    logo = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
+    bw, bh = base.size
+    target_w = max(1, int(bw * float(scale)))
+    ratio = target_w / logo.width
+    logo = logo.resize((target_w, max(1, int(logo.height * ratio))), Image.LANCZOS)
+    # Apply opacity to the logo's alpha channel.
+    alpha = logo.split()[3].point(lambda a: int(a * max(0.0, min(1.0, opacity))))
+    logo.putalpha(alpha)
+    margin = max(12, int(bw * 0.02))
+    lw, lh = logo.size
+    pos = {
+        "bottom-right": (bw - lw - margin, bh - lh - margin),
+        "bottom-left": (margin, bh - lh - margin),
+        "top-right": (bw - lw - margin, margin),
+        "top-left": (margin, margin),
+        "center": ((bw - lw) // 2, (bh - lh) // 2),
+    }.get(position, (bw - lw - margin, bh - lh - margin))
+    base.alpha_composite(logo, pos)
+    buf = io.BytesIO()
+    base.convert("RGB").save(buf, format="JPEG", quality=95, subsampling=0, optimize=True)
+    return buf.getvalue()
+
+
 def convert_to_jpeg(data: bytes, ext: str) -> bytes:
     """Convert HEIC/RAW bytes to optimized JPEG. Raises on failure."""
     if ext in HEIC_EXTS:
