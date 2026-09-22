@@ -78,6 +78,12 @@ Plataforma web/PWA en español para que agentes, agencias y fotógrafos inmobili
 - Backend nuevos módulos: `admin.py` (rutas), `providers.py` (adaptadores IA). server.py: is_super_admin, log_usage, get_tool_override, enrutado en `_apply_edit`.
 - Testing iteración 3: backend 10/10 pytest + frontend 100% (iteration_7).
 
+## Calidad de edición IA (2026-06)
+- [x] Anti-alucinación: prompts estrictos (la "Mejora automática" ya no inventa ventanas/cielos; herramientas de ajuste no añaden/quitan objetos; las de contenido preservan la arquitectura). `ai_edit.py` GEO_GUARD/STRICT_GUARD.
+- [x] Resolución client-ready: `imaging.finalize_edit()` sube la salida de Nano Banana (~1024px) a la resolución del original (hasta 2560px) con Lanczos + unsharp y entrega JPEG calidad 95 (≈4-6× más píxeles). Aplicado en `server._apply_edit` (motor por defecto y proveedores).
+- [x] Fiabilidad: motor principal `gemini-3.1-flash-image-preview` (rápido, ~8s, probado en prod) con **respaldo automático a `gemini-3-pro-image-preview`** si falla, + timeout controlado (`AI_EDIT_TIMEOUT`). Configurable con env `AI_IMAGE_MODEL` / `AI_IMAGE_FALLBACK_MODEL`.
+- Nota: todas las ediciones IA se pagan del saldo de la Universal Key (EMERGENT_LLM_KEY). Si en prod fallan tras republicar, recargar saldo.
+
 ## Rebrand (2026-06)
 - [x] App renombrada a "edit KRimagina" en título del navegador, meta, manifest PWA, login, header, footer y nombre de descarga. Logo (KR) añadido como badge en el componente Logo (`/app/frontend/public/logo-krimagina.jpg`) + favicon/apple-touch-icon.
 
