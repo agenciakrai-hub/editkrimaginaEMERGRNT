@@ -108,6 +108,10 @@ Plataforma web/PWA en español para que agentes, agencias y fotógrafos inmobili
 - [x] Fiabilidad: motor principal `gemini-3.1-flash-image-preview` (rápido, ~8s, probado en prod) con **respaldo automático a `gemini-3-pro-image-preview`** si falla, + timeout controlado (`AI_EDIT_TIMEOUT`). Configurable con env `AI_IMAGE_MODEL` / `AI_IMAGE_FALLBACK_MODEL`.
 - Nota: todas las ediciones IA se pagan del saldo de la Universal Key (EMERGENT_LLM_KEY). Si en prod fallan tras republicar, recargar saldo.
 
+## Botón "Mejorar todas" + despliegue (2026-06)
+- [x] Nuevo botón de un clic **"Mejorar todas · GRATIS"** en `PropertyView.jsx` (`auto-all-btn`): lanza el batch `auto` sobre todas las fotos del inmueble (0 créditos, pipeline local). Verificado e2e: 11/11 procesadas, 0 fallidas, créditos sin cambio.
+- [x] Desplegado a producción (edit.krimagina.com) vía deployer agent.
+
 ## Acabado "Mejora automática" pro (2026-06)
 - [x] Reescrito el pipeline LOCAL gratis (`local_edit.py` `auto`/`light_color`) para replicar el acabado flambient profesional de las fotos de referencia del usuario (KRFC): interiores brillantes (mediana ~178 desde originales RAW oscuros a ~40), paredes/techo blancos limpios, suelos cálidos, exterior de puertas/ventanas conservado.
 - Nuevos helpers: `_white_patch` (balance de blancos por percentil alto), `_devignette` (corrección radial flat-field del viñeteo, solo si se detecta), `_pro_tone` (levantado de sombras 1-(1-L)^k que protege altas luces/ventanas), `_levels_lum` (contraste en luminancia sin tintar), `_chroma_denoise` + `_neutralize_walls` (elimina parches de color en paredes claras).

@@ -192,6 +192,17 @@ export default function PropertyView() {
     }
   };
 
+  const applyAutoAll = async () => {
+    try {
+      const { data } = await api.post(`/properties/${id}/batch`, { action: "auto" });
+      setJob({ ...data, done: 0, failed: 0, processed: 0, status: "processing" });
+      pollJob(data.job_id);
+      toast.success(`Mejorando ${photos.length} fotos…`);
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
+
   const pollJob = (jobId) => {
     const interval = setInterval(async () => {
       try {
@@ -235,6 +246,10 @@ export default function PropertyView() {
             {prop?.address && <p className="text-slate-400 mt-1">{prop.address}</p>}
           </div>
           <div className="flex gap-3 flex-wrap">
+            <Button onClick={applyAutoAll} disabled={!photos.length || !!job} data-testid="auto-all-btn"
+              className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
+              <Wand2 className="w-4 h-4 mr-1.5" /> Mejorar todas <span className="ml-1.5 text-[10px] font-bold text-emerald-200">GRATIS</span>
+            </Button>
             <Button onClick={() => setBatchOpen(true)} disabled={!photos.length} data-testid="batch-edit-btn"
               variant="outline" className="rounded-full border-white/15 bg-white/5 hover:bg-white/10 text-white">
               <Layers className="w-4 h-4 mr-1.5" /> Editar por lote
