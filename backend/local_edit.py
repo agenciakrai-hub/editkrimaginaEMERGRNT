@@ -102,6 +102,100 @@ def _auto_brighten(bgr: np.ndarray, target: int = 140) -> np.ndarray:
     return _lift_shadows(bgr, amount).astype(np.uint8)
 
 
+def _white_patch(bgr: np.ndarray, pct: float = 97.0) -> np.ndarray:
+    """Neutral white balance from the brightest surfaces (walls/ceiling).
+
+    Maps each channel's high percentile to a common white point so grey/blue
+    casts disappear and walls read clean white. Clamped to avoid extreme shifts.
+    """
+    f = bgr.astype(np.float32)
+    his = np.array([np.percentile(f[..., c], pct) for c in range(3)], dtype=np.float32)
+    ref = float(his.max())
+    scale = np.clip(ref / (his + 1e-6), 0.85, 1.30)
+    return np.clip(f * scale, 0, 255).astype(np.uint8)
+
+
+def _devignette(bgr: np.ndarray) -> np.ndarray:
+    """Flat-field lens-vignetting correction: flatten the radial luminance falloff
+    toward the center brightness. Only kicks in when real vignetting is detected."""
+    f = bgr.astype(np.float32)
+    h, w = f.shape[:2]
+    lum = f.mean(axis=2)
+    cy, cx = h / 2.0, w / 2.0
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    r = np.sqrt(((xx - cx) / cx) ** 2 + ((yy - cy) / cy) ** 2) / 1.414
+    nb = 24
+    idx = np.clip((r * nb).astype(np.int32), 0, nb - 1)
+    prof = np.array([np.median(lum[idx == i]) if np.any(idx == i) else 0.0 for i in range(nb)], np.float32)
+    ref = float(prof[:max(1, nb // 4)].mean())
+    outer = float(prof[-4:].mean())
+    if ref < 1 or outer / (ref + 1e-6) > 0.85:
+        return bgr  # no significant vignette
+    gain_prof = np.clip(ref / (prof + 1e-3), 1.0, 4.0)
+    gain = gain_prof[idx].astype(np.float32)
+    gain = cv2.GaussianBlur(gain, (0, 0), max(4.0, min(h, w) / 22.0))
+    return np.clip(f * gain[..., None], 0, 255).astype(np.uint8)
+
+
+def _chroma_denoise(bgr: np.ndarray) -> np.ndarray:
+    """Remove color blotches/noise on flat walls by smoothing only the a/b chroma."""
+    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    sigma = max(3.0, min(bgr.shape[:2]) / 160.0)
+    a = cv2.GaussianBlur(a, (0, 0), sigma)
+    b = cv2.GaussianBlur(b, (0, 0), sigma)
+    return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+
+
+def _neutralize_walls(bgr: np.ndarray, strength: float = 0.9) -> np.ndarray:
+    """Make bright, low-saturation surfaces (walls/ceiling) clean neutral white,
+    removing faint colored blotches, while leaving colorful areas (floor, sky) intact."""
+    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+    l, a, b = lab[..., 0], lab[..., 1], lab[..., 2]
+    chroma = np.sqrt((a - 128) ** 2 + (b - 128) ** 2)
+    wl = np.clip((l - 150.0) / 80.0, 0, 1)          # bright surfaces
+    wc = np.clip(1.0 - (chroma - 6.0) / 26.0, 0, 1)  # already low-chroma
+    w = np.clip(wl * wc * strength, 0, 1)
+    lab[..., 1] = a * (1 - w) + 128.0 * w
+    lab[..., 2] = b * (1 - w) + 128.0 * w
+    return cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2BGR)
+
+
+def _levels_lum(bgr: np.ndarray, lo_pct: float = 0.4, hi_pct: float = 0.1) -> np.ndarray:
+    """Contrast / black + white point on LUMINANCE only (no color cast)."""
+    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    lf = l.astype(np.float32)
+    lo = np.percentile(lf, lo_pct)
+    hi = np.percentile(lf, 100 - hi_pct)
+    if hi > lo:
+        lf = (lf - lo) * 255.0 / (hi - lo)
+    l = np.clip(lf, 0, 255).astype(np.uint8)
+    return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+
+
+def _pro_tone(bgr: np.ndarray, target: float = 0.72) -> np.ndarray:
+    """Bright, professional real-estate tone: strong shadow/mid lift that ROLLS
+    OFF highlights so windows and exteriors are protected (never blown out).
+
+    Uses newL = 1-(1-L)^k on the luminance, with k solved so the median luminance
+    reaches `target`; RGB are scaled by the same gain to preserve color/hue.
+    """
+    f = bgr.astype(np.float32) / 255.0
+    lum = f.mean(axis=2, keepdims=True)
+    med = float(np.median(lum))
+    med = min(max(med, 0.02), 0.95)
+    if med < target:
+        k = np.log(max(1e-3, 1.0 - target)) / np.log(max(1e-3, 1.0 - med))
+    else:
+        k = 1.0
+    k = float(np.clip(k, 1.0, 9.0))
+    new_lum = 1.0 - np.power(np.clip(1.0 - lum, 0, 1), k)
+    gain = new_lum / (lum + 1e-4)
+    out = np.clip(f * gain, 0, 1.0) * 255.0
+    return out.astype(np.uint8)
+
+
 def _warm(bgr: np.ndarray, amount: float = 0.04) -> np.ndarray:
     """Subtle inviting warmth (slightly boost red, lower blue)."""
     f = bgr.astype(np.float32)
@@ -113,12 +207,16 @@ def _warm(bgr: np.ndarray, amount: float = 0.04) -> np.ndarray:
 def light_color(data: bytes) -> bytes:
     """Bright, clean, vivid real-estate light & color (free, local)."""
     bgr = _to_bgr(data)
-    bgr = _auto_brighten(bgr, 140)     # lift dim interiors, protect windows
-    bgr = _auto_levels(bgr)            # white balance + contrast + pop
-    bgr = _clahe(bgr, 1.8)             # local contrast on walls
-    bgr = _saturation(bgr, 1.18)       # pleasant color
-    bgr = _warm(bgr, 0.04)             # inviting warmth
-    bgr = _sharpen(bgr, 0.6)           # crisp detail
+    bgr = _white_patch(bgr)            # neutral white balance (walls white)
+    bgr = _devignette(bgr)             # lift dark lens corners if present
+    bgr = _pro_tone(bgr, 0.72)         # bright, highlight-safe exposure lift
+    bgr = _levels_lum(bgr)             # crisp black/white point (no color cast)
+    bgr = _clahe(bgr, 1.3)             # gentle local contrast
+    bgr = _chroma_denoise(bgr)         # kill color blotches on walls
+    bgr = _neutralize_walls(bgr)       # clean white walls/ceiling
+    bgr = _saturation(bgr, 1.12)       # pleasant color
+    bgr = _warm(bgr, 0.05)             # inviting warmth (wood floors)
+    bgr = _sharpen(bgr, 0.55)          # crisp detail
     return _to_jpeg(bgr)
 
 
@@ -273,19 +371,23 @@ def inpaint(data: bytes, mask_bytes: bytes) -> bytes:
 
 
 def auto(data: bytes) -> bytes:
-    """One-click essential enhancement: straighten + professional light/color."""
+    """One-click essential enhancement: straighten + professional bright light/color."""
     bgr = _to_bgr(data)
     bgr = _auto_rotate(bgr)
     try:
         bgr = _keystone(bgr)
     except Exception:
         logger.warning("keystone skipped")
-    bgr = _auto_brighten(bgr, 145)
-    bgr = _auto_levels(bgr)
-    bgr = _clahe(bgr, 1.6)
-    bgr = _saturation(bgr, 1.18)
-    bgr = _warm(bgr, 0.04)
-    bgr = _sharpen(bgr, 0.6)
+    bgr = _white_patch(bgr)            # neutral white balance (walls white)
+    bgr = _devignette(bgr)             # lift dark lens corners if present
+    bgr = _pro_tone(bgr, 0.73)         # bright, highlight-safe exposure lift
+    bgr = _levels_lum(bgr)             # crisp black/white point (no color cast)
+    bgr = _clahe(bgr, 1.3)             # gentle local contrast
+    bgr = _chroma_denoise(bgr)         # kill color blotches on walls
+    bgr = _neutralize_walls(bgr)       # clean white walls/ceiling
+    bgr = _saturation(bgr, 1.12)       # pleasant color
+    bgr = _warm(bgr, 0.05)             # inviting warmth (wood floors)
+    bgr = _sharpen(bgr, 0.55)          # crisp detail
     return _to_jpeg(bgr)
 
 

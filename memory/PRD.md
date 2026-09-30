@@ -108,6 +108,12 @@ Plataforma web/PWA en español para que agentes, agencias y fotógrafos inmobili
 - [x] Fiabilidad: motor principal `gemini-3.1-flash-image-preview` (rápido, ~8s, probado en prod) con **respaldo automático a `gemini-3-pro-image-preview`** si falla, + timeout controlado (`AI_EDIT_TIMEOUT`). Configurable con env `AI_IMAGE_MODEL` / `AI_IMAGE_FALLBACK_MODEL`.
 - Nota: todas las ediciones IA se pagan del saldo de la Universal Key (EMERGENT_LLM_KEY). Si en prod fallan tras republicar, recargar saldo.
 
+## Acabado "Mejora automática" pro (2026-06)
+- [x] Reescrito el pipeline LOCAL gratis (`local_edit.py` `auto`/`light_color`) para replicar el acabado flambient profesional de las fotos de referencia del usuario (KRFC): interiores brillantes (mediana ~178 desde originales RAW oscuros a ~40), paredes/techo blancos limpios, suelos cálidos, exterior de puertas/ventanas conservado.
+- Nuevos helpers: `_white_patch` (balance de blancos por percentil alto), `_devignette` (corrección radial flat-field del viñeteo, solo si se detecta), `_pro_tone` (levantado de sombras 1-(1-L)^k que protege altas luces/ventanas), `_levels_lum` (contraste en luminancia sin tintar), `_chroma_denoise` + `_neutralize_walls` (elimina parches de color en paredes claras).
+- Validado con los 2 RAW (.CR3) + 2 JPG editados del usuario y con re-aplicación sobre fotos ya brillantes (no sobreprocesa).
+- LÍMITE conocido: la recuperación del exterior funciona porque los RAW se disparan expuestos para las altas luces (exterior ya capturado). Si la ventana está totalmente quemada (blanco puro, sin datos), la herramienta gratis NO puede inventar el exterior → requiere "Window pull" premium (IA).
+
 ## Corrección de perspectiva (2026-06)
 - [x] "Enderezar perspectiva" gratis (local `local_edit.py`) reforzado para que el efecto se note: auto-rotación ±8° y keystone más agresivo (mín. 4 verticales, umbral conv 0.02, desplazamiento hasta 9% del ancho). Sigue costando 0 créditos.
 - [x] Nueva herramienta premium **"Perspectiva Pro (IA)"** (`perspective_pro`, 2 créditos): usa Gemini (flash + respaldo Pro) con prompt de tilt-shift/keystone arquitectónico estricto (STRICT_ACTIONS, no inventa contenido). Aparece bajo Premium en el editor (icono `Frame`).
