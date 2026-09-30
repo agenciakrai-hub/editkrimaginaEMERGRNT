@@ -17,6 +17,9 @@ logger = logging.getLogger("watchful.providers")
 _IMAGE_HINTS = (
     "image", "gpt-image", "dall-e", "dalle", "flux", "imagen", "nano-banana",
     "stable-diffusion", "sdxl", "sd3", "seedream", "kontext", "qwen-image",
+    # KRAI is an OpenAI-compatible gateway used by this app; its model
+    # aliases can be image-capable even when the alias itself lacks "image".
+    "krai-",
 )
 
 # Curated fal.ai catalogue (fal has no key-authed /models listing endpoint).
