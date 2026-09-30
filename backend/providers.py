@@ -100,7 +100,7 @@ def _openai_edit(base_url: str, api_key: str, model_id: str, image_bytes: bytes,
     r = requests.post(
         base_url + "/images/edits",
         headers={"Authorization": f"Bearer {api_key}"},
-        files=files, data=data, timeout=180,
+        files=files, data=data, timeout=90,
     )
     r.raise_for_status()
     payload = r.json()
@@ -108,7 +108,7 @@ def _openai_edit(base_url: str, api_key: str, model_id: str, image_bytes: bytes,
     if item.get("b64_json"):
         return base64.b64decode(item["b64_json"])
     if item.get("url"):
-        img = requests.get(item["url"], timeout=60)
+        img = requests.get(item["url"], timeout=30)
         img.raise_for_status()
         return img.content
     raise RuntimeError("provider_no_image")
