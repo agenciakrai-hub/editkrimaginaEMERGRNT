@@ -85,16 +85,52 @@ async def log_usage(user_id: str, kind: str, action: str, credits: int, gemini_c
 
 
 async def get_tool_override(action_key: str):
-    """Return (provider_doc, model_id) if an admin assigned a custom engine to this tool, else None."""
+    """Return the administrator-selected engine for a photo tool.
+
+    An explicit admin selection is authoritative. If it is configured but the
+    provider/model is unavailable, raise instead of silently falling back to
+    Emergent/Gemini. This keeps provider routing independent from app credits.
+    """
     settings = await db.ai_settings.find_one({"id": "tool_overrides"})
     if not settings:
         return None
     ov = (settings.get("overrides") or {}).get(action_key)
     if not ov or not ov.get("provider_id") or not ov.get("model_id"):
         return None
+
     prov = await db.ai_providers.find_one({"id": ov["provider_id"]})
-    if not prov or prov.get("status") == "invalid_key":
-        return None
+    if not prov:
+        raise ProviderEditError(
+            provider="proveedor configurado",
+            model=ov["model_id"],
+            reason="El proveedor seleccionado por el administrador no existe.",
+        )
+    if prov.get("status") != "valid":
+        raise ProviderEditError(
+            provider=prov.get("name") or prov.get("type") or "proveedor",
+            model=ov["model_id"],
+            reason=f"El proveedor no está disponible (estado: {prov.get('status', 'desconocido')}).",
+        )
+
+    model = next((m for m in prov.get("models", []) if m.get("id") == ov["model_id"]), None)
+    if not model:
+        raise ProviderEditError(
+            provider=prov.get("name") or prov.get("type") or "proveedor",
+            model=ov["model_id"],
+            reason="El modelo seleccionado ya no está disponible en el proveedor.",
+        )
+    if not model.get("can_edit"):
+        raise ProviderEditError(
+            provider=prov.get("name") or prov.get("type") or "proveedor",
+            model=ov["model_id"],
+            reason="El modelo seleccionado no está habilitado para edición de imágenes.",
+        )
+    if not prov.get("enabled", {}).get(ov["model_id"], {}).get("photo"):
+        raise ProviderEditError(
+            provider=prov.get("name") or prov.get("type") or "proveedor",
+            model=ov["model_id"],
+            reason="El modelo seleccionado no está habilitado para Foto.",
+        )
     return prov, ov["model_id"]
 
 class ProviderEditError(RuntimeError):
