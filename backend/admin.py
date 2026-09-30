@@ -287,6 +287,18 @@ def register_admin_routes(api, db, current_user, action_catalog):
         settings = await db.ai_settings.find_one({"id": "tool_overrides"}) or {"overrides": {}}
         overrides = settings.get("overrides", {})
         if data.provider_id and data.model_id:
+            provider = await db.ai_providers.find_one({"id": data.provider_id})
+            if not provider:
+                raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+            if provider.get("status") != "valid":
+                raise HTTPException(status_code=400, detail="El proveedor no está validado")
+            model = next((m for m in provider.get("models", []) if m.get("id") == data.model_id), None)
+            if not model:
+                raise HTTPException(status_code=400, detail="Modelo no encontrado en el proveedor")
+            if not provider.get("enabled", {}).get(data.model_id, {}).get("photo"):
+                raise HTTPException(status_code=400, detail="Activa primero el modelo para Foto")
+            if not model.get("can_edit"):
+                raise HTTPException(status_code=400, detail="El modelo seleccionado no está marcado como compatible con edición de imágenes")
             overrides[data.action] = {"provider_id": data.provider_id, "model_id": data.model_id}
         else:
             overrides.pop(data.action, None)
