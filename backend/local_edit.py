@@ -45,7 +45,7 @@ def _clahe(bgr: np.ndarray, clip: float = 2.2) -> np.ndarray:
     """Local contrast (HDR-like) via CLAHE on the L channel."""
     lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
-    l = cv2.createCLAHE(clipLimit=clip, tileGridSize=(8, 8)).apply(l)
+    l = cv2.createCLAHE(clipLimit=clip, tileGridSize=(12, 12)).apply(l)
     return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
 
 
@@ -66,14 +66,59 @@ def _sharpen(bgr: np.ndarray, amount: float = 0.5) -> np.ndarray:
     return cv2.addWeighted(bgr, 1 + amount, blur, -amount, 0)
 
 
+def _auto_levels(bgr: np.ndarray, lo_pct: float = 0.5, hi_pct: float = 0.2) -> np.ndarray:
+    """Per-channel percentile stretch: fixes color casts, adds contrast & pop.
+
+    Clips a small % of darkest pixels (black point) and only the very brightest
+    (hi_pct small) so bright exterior/windows are not over-clipped.
+    """
+    out = np.empty_like(bgr, dtype=np.float32)
+    for c in range(3):
+        ch = bgr[..., c].astype(np.float32)
+        lo = np.percentile(ch, lo_pct)
+        hi = np.percentile(ch, 100 - hi_pct)
+        if hi <= lo:
+            out[..., c] = ch
+        else:
+            out[..., c] = (ch - lo) * 255.0 / (hi - lo)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def _lift_shadows(bgr: np.ndarray, amount: float = 0.7) -> np.ndarray:
+    """Brighten dim rooms: strong gain in shadows, ~none in highlights (protects windows)."""
+    f = bgr.astype(np.float32) / 255.0
+    lum = f.mean(axis=2, keepdims=True)
+    gain = 1.0 + amount * (1.0 - lum) ** 1.5
+    return np.clip(f * gain, 0, 1.0) * 255.0
+
+
+def _auto_brighten(bgr: np.ndarray, target: int = 140) -> np.ndarray:
+    """Scale brightness toward a target median luminance for dark photos only."""
+    l = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)[..., 0]
+    med = float(np.median(l))
+    if med >= target or med < 1:
+        return bgr
+    amount = min(0.9, (target - med) / 180.0 + 0.25)
+    return _lift_shadows(bgr, amount).astype(np.uint8)
+
+
+def _warm(bgr: np.ndarray, amount: float = 0.04) -> np.ndarray:
+    """Subtle inviting warmth (slightly boost red, lower blue)."""
+    f = bgr.astype(np.float32)
+    f[..., 2] = np.clip(f[..., 2] * (1 + amount), 0, 255)   # R
+    f[..., 0] = np.clip(f[..., 0] * (1 - amount * 0.6), 0, 255)  # B
+    return f.astype(np.uint8)
+
+
 def light_color(data: bytes) -> bytes:
-    """Professional real-estate light & color: white balance, HDR contrast, tone, pop."""
+    """Bright, clean, vivid real-estate light & color (free, local)."""
     bgr = _to_bgr(data)
-    bgr = _white_balance(bgr)
-    bgr = _tone(bgr, 0.88)
-    bgr = _clahe(bgr, 2.2)
-    bgr = _saturation(bgr, 1.12)
-    bgr = _sharpen(bgr, 0.5)
+    bgr = _auto_brighten(bgr, 140)     # lift dim interiors, protect windows
+    bgr = _auto_levels(bgr)            # white balance + contrast + pop
+    bgr = _clahe(bgr, 1.8)             # local contrast on walls
+    bgr = _saturation(bgr, 1.18)       # pleasant color
+    bgr = _warm(bgr, 0.04)             # inviting warmth
+    bgr = _sharpen(bgr, 0.6)           # crisp detail
     return _to_jpeg(bgr)
 
 
@@ -235,11 +280,12 @@ def auto(data: bytes) -> bytes:
         bgr = _keystone(bgr)
     except Exception:
         logger.warning("keystone skipped")
-    bgr = _white_balance(bgr)
-    bgr = _tone(bgr, 0.9)
-    bgr = _clahe(bgr, 2.2)
-    bgr = _saturation(bgr, 1.10)
-    bgr = _sharpen(bgr, 0.55)
+    bgr = _auto_brighten(bgr, 145)
+    bgr = _auto_levels(bgr)
+    bgr = _clahe(bgr, 1.6)
+    bgr = _saturation(bgr, 1.18)
+    bgr = _warm(bgr, 0.04)
+    bgr = _sharpen(bgr, 0.6)
     return _to_jpeg(bgr)
 
 

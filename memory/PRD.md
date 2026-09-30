@@ -78,6 +78,12 @@ Plataforma web/PWA en español para que agentes, agencias y fotógrafos inmobili
 - Backend nuevos módulos: `admin.py` (rutas), `providers.py` (adaptadores IA). server.py: is_super_admin, log_usage, get_tool_override, enrutado en `_apply_edit`.
 - Testing iteración 3: backend 10/10 pytest + frontend 100% (iteration_7).
 
+## Mejora de calidad del pipeline local (2026-06)
+- [x] Sustituido el balance gray-world (agrisaba interiores) por **auto-niveles por canal** (balance de blancos + contraste + pop) que protege luces del exterior.
+- [x] **Realce de sombras** con ganancia dependiente de la luminancia (ilumina interiores oscuros ISO alto sin quemar ventanas) + auto-brillo hacia objetivo.
+- [x] Color más vivo (saturación 1.18), calidez sutil, nitidez, y CLAHE con rejilla 12×12 para evitar parches en paredes lisas.
+- Resultado: fotos brillantes, nítidas, colores agradables, paredes iluminadas y exterior conservado. Validado visualmente en interiores oscuros.
+
 ## Exportación, marca de agua y borrador (2026-06)
 - [x] **Descargar todas (ZIP)**: `GET /api/properties/{id}/download-all?preset=&watermark=` empaqueta todas las fotos del proyecto en un ZIP. Botón desplegable en PropertyView con presets de portal + "con marca de agua".
 - [x] **Presets de portales**: `GET /api/photos/{id}/export?preset=` (Original, Idealista 2048×1536, Fotocasa 2000×1500, Zillow 2048×1536, MLS 1024×768). Desplegable "Descargar" en el Editor. `imaging.resize_preset` (fit, sin ampliar).
