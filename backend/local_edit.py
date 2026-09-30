@@ -139,7 +139,7 @@ def _auto_rotate(bgr: np.ndarray) -> np.ndarray:
             angles.append(ang - 180 if ang > 0 else ang + 180)
     if not angles:
         return bgr
-    tilt = float(np.clip(np.median(angles), -5, 5))
+    tilt = float(np.clip(np.median(angles), -8, 8))
     if abs(tilt) < 0.2:
         return bgr
     h, w = bgr.shape[:2]
@@ -164,14 +164,14 @@ def _keystone(bgr: np.ndarray) -> np.ndarray:
             cx = (x1 + x2) / 2.0
             slope = (x2 - x1) / float(y2 - y1)
             slopes.append((cx, slope))
-    if len(slopes) < 8:
+    if len(slopes) < 4:
         return bgr
     left = np.median([s for cx, s in slopes if cx < w / 2]) if any(cx < w / 2 for cx, _ in slopes) else 0.0
     right = np.median([s for cx, s in slopes if cx >= w / 2]) if any(cx >= w / 2 for cx, _ in slopes) else 0.0
     conv = (left - right)  # >0 when verticals converge toward the top
-    if not np.isfinite(conv) or abs(conv) < 0.035:
+    if not np.isfinite(conv) or abs(conv) < 0.02:
         return bgr
-    shift = float(np.clip(abs(conv) * h * 0.4, 0, w * 0.04))  # clamp to 4% width
+    shift = float(np.clip(abs(conv) * h * 0.9, 0, w * 0.09))  # clamp to 9% width
     src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
     if conv > 0:  # top narrower than needed -> widen the top
         dst = np.float32([[-shift, 0], [w + shift, 0], [w, h], [0, h]])

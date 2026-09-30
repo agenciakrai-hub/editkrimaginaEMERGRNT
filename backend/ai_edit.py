@@ -27,7 +27,7 @@ STRICT_GUARD = (
     "scene that is not already visible in the original. Keep every existing item identical in "
     "shape, position, material and color. Only apply the requested photographic adjustment."
 )
-STRICT_ACTIONS = {"auto", "light", "straighten", "upscale"}
+STRICT_ACTIONS = {"auto", "light", "straighten", "upscale", "perspective_pro"}
 
 ACTIONS = {
     "auto": {
@@ -137,6 +137,21 @@ ACTIONS = {
         "prompt": (
             "Upscale this real-estate photo and enhance its sharpness, resolution, fine detail and "
             "clarity. Reduce noise, blur and compression artifacts while keeping colors natural."
+        ),
+    },
+    "perspective_pro": {
+        "label": "Perspectiva Pro (IA)",
+        "description": "Verticales perfectamente a plomo con IA, como un objetivo tilt-shift.",
+        "cost": 2, "category": "premium", "disclosure_default": False,
+        "prompt": (
+            "Act as a professional architectural photographer using a high-end tilt-shift lens "
+            "combined with Photoshop perspective/keystone correction. Aggressively but realistically "
+            "correct the perspective, keystone and lens distortion of this real-estate photo so that "
+            "EVERY vertical line (wall corners, door frames, window frames, columns, cabinets, "
+            "furniture edges) becomes perfectly vertical and plumb, and the horizon is perfectly "
+            "level. Fix converging verticals and any barrel/pincushion lens distortion so walls are "
+            "straight. Keep the proportions natural and the result photorealistic without stretching, "
+            "squashing or duplicating furniture, people or architectural elements."
         ),
     },
 }

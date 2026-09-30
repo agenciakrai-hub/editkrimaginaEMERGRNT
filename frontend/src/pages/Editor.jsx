@@ -18,13 +18,14 @@ import {
 import { motion } from "framer-motion";
 import {
   ArrowLeft, Zap, Loader2, Download, Undo2, ShieldCheck, GitCompareArrows, Image as ImageIcon,
-  Sun, Sparkles, SlidersHorizontal, Moon, Eraser, Trees, PanelTop, Sofa, Maximize, Wand2,
+  Sun, Sparkles, SlidersHorizontal, Moon, Eraser, Trees, PanelTop, Sofa, Maximize, Wand2, Frame,
 } from "lucide-react";
 import { toast } from "sonner";
 
 const ICONS = {
   auto: Wand2, sky: Sun, light: Sparkles, straighten: SlidersHorizontal, twilight: Moon,
   declutter: Eraser, lawn: Trees, window_pull: PanelTop, staging: Sofa, upscale: Maximize,
+  perspective_pro: Frame,
 };
 const STYLES = [
   { key: "nordico", label: "Nórdico" },

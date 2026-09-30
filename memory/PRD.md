@@ -108,6 +108,10 @@ Plataforma web/PWA en español para que agentes, agencias y fotógrafos inmobili
 - [x] Fiabilidad: motor principal `gemini-3.1-flash-image-preview` (rápido, ~8s, probado en prod) con **respaldo automático a `gemini-3-pro-image-preview`** si falla, + timeout controlado (`AI_EDIT_TIMEOUT`). Configurable con env `AI_IMAGE_MODEL` / `AI_IMAGE_FALLBACK_MODEL`.
 - Nota: todas las ediciones IA se pagan del saldo de la Universal Key (EMERGENT_LLM_KEY). Si en prod fallan tras republicar, recargar saldo.
 
+## Corrección de perspectiva (2026-06)
+- [x] "Enderezar perspectiva" gratis (local `local_edit.py`) reforzado para que el efecto se note: auto-rotación ±8° y keystone más agresivo (mín. 4 verticales, umbral conv 0.02, desplazamiento hasta 9% del ancho). Sigue costando 0 créditos.
+- [x] Nueva herramienta premium **"Perspectiva Pro (IA)"** (`perspective_pro`, 2 créditos): usa Gemini (flash + respaldo Pro) con prompt de tilt-shift/keystone arquitectónico estricto (STRICT_ACTIONS, no inventa contenido). Aparece bajo Premium en el editor (icono `Frame`).
+
 ## Rebrand (2026-06)
 - [x] App renombrada a "edit KRimagina" en título del navegador, meta, manifest PWA, login, header, footer y nombre de descarga. Logo (KR) añadido como badge en el componente Logo (`/app/frontend/public/logo-krimagina.jpg`) + favicon/apple-touch-icon.
 
