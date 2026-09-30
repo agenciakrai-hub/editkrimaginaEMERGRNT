@@ -108,6 +108,12 @@ Plataforma web/PWA en español para que agentes, agencias y fotógrafos inmobili
 - [x] Fiabilidad: motor principal `gemini-3.1-flash-image-preview` (rápido, ~8s, probado en prod) con **respaldo automático a `gemini-3-pro-image-preview`** si falla, + timeout controlado (`AI_EDIT_TIMEOUT`). Configurable con env `AI_IMAGE_MODEL` / `AI_IMAGE_FALLBACK_MODEL`.
 - Nota: todas las ediciones IA se pagan del saldo de la Universal Key (EMERGENT_LLM_KEY). Si en prod fallan tras republicar, recargar saldo.
 
+## "Mejora rápida" (gratis) + "Mejora Pro (IA)" — opción c (2026-06)
+- [x] **Mejora rápida (gratis, local)**: reescrita para evitar artefactos — de-viñeteado SOLO en luminancia (elimina el "glow" azul), sin keystone (evita distorsión), CLAHE/sharpen suaves + `_smooth_flat` (bilateral) para paredes limpias sin grano. Validado a resolución completa (2560px, ~1.5s) con los RAW del usuario: brillante, blancos limpios, exterior conservado, sin glow ni distorsión.
+- [x] **Mejora Pro (IA)** nueva acción `auto_pro` (`ai_edit.py`, Gemini flash+Pro, coste 1 crédito, premium): acabado flambient profesional = relucido, blancos limpios, window pull (recupera vista por ventanas existentes), corrección de lente/viñeteo, verticales a plomo. Validado e2e por la app (subida→edit auto_pro→resultado en ~10s): resultado prácticamente idéntico a la referencia del usuario (paredes blancas, ventana con cielo/tejados recuperados, suelo cálido).
+- [x] Frontend `Editor.jsx`: botón headline **"Mejora rápida · GRATIS"** + **"Mejora Pro · ⚡1"**; `auto_pro` excluido de la lista premium para no duplicar. Iconos `Wand2`/`Stars`. El diálogo "Editar por lote" ya lista ambas para aplicar a todo el inmueble.
+- Routing (`server._apply_edit`): `auto`/`light` → local gratis; `auto_pro`/`perspective_pro` → IA (créditos). Owner = gratis.
+
 ## Botón "Mejorar todas" + despliegue (2026-06)
 - [x] Nuevo botón de un clic **"Mejorar todas · GRATIS"** en `PropertyView.jsx` (`auto-all-btn`): lanza el batch `auto` sobre todas las fotos del inmueble (0 créditos, pipeline local). Verificado e2e: 11/11 procesadas, 0 fallidas, créditos sin cambio.
 - [x] Desplegado a producción (edit.krimagina.com) vía deployer agent.

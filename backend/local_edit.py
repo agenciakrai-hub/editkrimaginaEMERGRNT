@@ -116,11 +116,11 @@ def _white_patch(bgr: np.ndarray, pct: float = 97.0) -> np.ndarray:
 
 
 def _devignette(bgr: np.ndarray) -> np.ndarray:
-    """Flat-field lens-vignetting correction: flatten the radial luminance falloff
-    toward the center brightness. Only kicks in when real vignetting is detected."""
-    f = bgr.astype(np.float32)
-    h, w = f.shape[:2]
-    lum = f.mean(axis=2)
+    """Flat-field lens-vignetting correction on LUMINANCE ONLY (so dark corners
+    brighten WITHOUT amplifying color/blue noise). Only kicks in for real vignetting."""
+    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+    lum = lab[..., 0]
+    h, w = lum.shape
     cy, cx = h / 2.0, w / 2.0
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     r = np.sqrt(((xx - cx) / cx) ** 2 + ((yy - cy) / cy) ** 2) / 1.414
@@ -131,30 +131,37 @@ def _devignette(bgr: np.ndarray) -> np.ndarray:
     outer = float(prof[-4:].mean())
     if ref < 1 or outer / (ref + 1e-6) > 0.85:
         return bgr  # no significant vignette
-    gain_prof = np.clip(ref / (prof + 1e-3), 1.0, 4.0)
+    gain_prof = np.clip(ref / (prof + 1e-3), 1.0, 2.6)
     gain = gain_prof[idx].astype(np.float32)
-    gain = cv2.GaussianBlur(gain, (0, 0), max(4.0, min(h, w) / 22.0))
-    return np.clip(f * gain[..., None], 0, 255).astype(np.uint8)
+    gain = cv2.GaussianBlur(gain, (0, 0), max(4.0, min(h, w) / 20.0))
+    lab[..., 0] = np.clip(lum * gain, 0, 255)
+    return cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2BGR)
 
 
 def _chroma_denoise(bgr: np.ndarray) -> np.ndarray:
     """Remove color blotches/noise on flat walls by smoothing only the a/b chroma."""
     lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
-    sigma = max(3.0, min(bgr.shape[:2]) / 160.0)
+    sigma = max(3.0, min(bgr.shape[:2]) / 140.0)
     a = cv2.GaussianBlur(a, (0, 0), sigma)
     b = cv2.GaussianBlur(b, (0, 0), sigma)
     return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
 
 
-def _neutralize_walls(bgr: np.ndarray, strength: float = 0.9) -> np.ndarray:
+def _smooth_flat(bgr: np.ndarray) -> np.ndarray:
+    """Gently denoise flat, low-detail areas (walls) while keeping edges crisp."""
+    d = max(5, int(min(bgr.shape[:2]) / 260) | 1)
+    return cv2.bilateralFilter(bgr, d, 22, 8)
+
+
+def _neutralize_walls(bgr: np.ndarray, strength: float = 0.92) -> np.ndarray:
     """Make bright, low-saturation surfaces (walls/ceiling) clean neutral white,
     removing faint colored blotches, while leaving colorful areas (floor, sky) intact."""
     lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
     l, a, b = lab[..., 0], lab[..., 1], lab[..., 2]
     chroma = np.sqrt((a - 128) ** 2 + (b - 128) ** 2)
-    wl = np.clip((l - 150.0) / 80.0, 0, 1)          # bright surfaces
-    wc = np.clip(1.0 - (chroma - 6.0) / 26.0, 0, 1)  # already low-chroma
+    wl = np.clip((l - 120.0) / 90.0, 0, 1)           # bright/mid surfaces
+    wc = np.clip(1.0 - (chroma - 7.0) / 30.0, 0, 1)  # already low-chroma
     w = np.clip(wl * wc * strength, 0, 1)
     lab[..., 1] = a * (1 - w) + 128.0 * w
     lab[..., 2] = b * (1 - w) + 128.0 * w
@@ -208,15 +215,16 @@ def light_color(data: bytes) -> bytes:
     """Bright, clean, vivid real-estate light & color (free, local)."""
     bgr = _to_bgr(data)
     bgr = _white_patch(bgr)            # neutral white balance (walls white)
-    bgr = _devignette(bgr)             # lift dark lens corners if present
-    bgr = _pro_tone(bgr, 0.72)         # bright, highlight-safe exposure lift
+    bgr = _devignette(bgr)             # lift dark lens corners (luminance only)
+    bgr = _pro_tone(bgr, 0.70)         # bright, highlight-safe exposure lift
     bgr = _levels_lum(bgr)             # crisp black/white point (no color cast)
-    bgr = _clahe(bgr, 1.3)             # gentle local contrast
+    bgr = _clahe(bgr, 1.1)             # subtle local contrast (no HDR grunge)
     bgr = _chroma_denoise(bgr)         # kill color blotches on walls
+    bgr = _smooth_flat(bgr)            # smooth wall grain, keep edges
     bgr = _neutralize_walls(bgr)       # clean white walls/ceiling
-    bgr = _saturation(bgr, 1.12)       # pleasant color
+    bgr = _saturation(bgr, 1.10)       # pleasant color
     bgr = _warm(bgr, 0.05)             # inviting warmth (wood floors)
-    bgr = _sharpen(bgr, 0.55)          # crisp detail
+    bgr = _sharpen(bgr, 0.4)           # gentle crispness
     return _to_jpeg(bgr)
 
 
@@ -371,23 +379,24 @@ def inpaint(data: bytes, mask_bytes: bytes) -> bytes:
 
 
 def auto(data: bytes) -> bytes:
-    """One-click essential enhancement: straighten + professional bright light/color."""
+    """One-click essential enhancement: level + clean, bright professional light/color.
+
+    Geometry is kept safe (gentle deskew only, no perspective warp) to avoid
+    distortion; use the dedicated 'straighten' / 'Perspectiva Pro' tools for that.
+    """
     bgr = _to_bgr(data)
-    bgr = _auto_rotate(bgr)
-    try:
-        bgr = _keystone(bgr)
-    except Exception:
-        logger.warning("keystone skipped")
+    bgr = _auto_rotate(bgr)            # gentle horizon leveling only (no warp)
     bgr = _white_patch(bgr)            # neutral white balance (walls white)
-    bgr = _devignette(bgr)             # lift dark lens corners if present
-    bgr = _pro_tone(bgr, 0.73)         # bright, highlight-safe exposure lift
+    bgr = _devignette(bgr)             # lift dark lens corners (luminance only)
+    bgr = _pro_tone(bgr, 0.71)         # bright, highlight-safe exposure lift
     bgr = _levels_lum(bgr)             # crisp black/white point (no color cast)
-    bgr = _clahe(bgr, 1.3)             # gentle local contrast
+    bgr = _clahe(bgr, 1.1)             # subtle local contrast (no HDR grunge)
     bgr = _chroma_denoise(bgr)         # kill color blotches on walls
+    bgr = _smooth_flat(bgr)            # smooth wall grain, keep edges
     bgr = _neutralize_walls(bgr)       # clean white walls/ceiling
-    bgr = _saturation(bgr, 1.12)       # pleasant color
+    bgr = _saturation(bgr, 1.10)       # pleasant color
     bgr = _warm(bgr, 0.05)             # inviting warmth (wood floors)
-    bgr = _sharpen(bgr, 0.55)          # crisp detail
+    bgr = _sharpen(bgr, 0.4)           # gentle crispness
     return _to_jpeg(bgr)
 
 

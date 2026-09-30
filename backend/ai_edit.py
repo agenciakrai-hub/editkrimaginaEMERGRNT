@@ -154,6 +154,24 @@ ACTIONS = {
             "squashing or duplicating furniture, people or architectural elements."
         ),
     },
+    "auto_pro": {
+        "label": "Mejora Pro (IA)",
+        "description": "Acabado profesional de revista con IA: como tu referencia.",
+        "cost": 1, "category": "premium", "disclosure_default": False,
+        "prompt": (
+            "Professionally edit this real-estate photograph into a bright, clean, natural "
+            "magazine-quality 'flambient' look. Do ALL of the following: balance the exposure with a "
+            "clean, subtle HDR; lift the shadows and recover highlights so the room is bright, airy and "
+            "inviting; set an accurate neutral white balance so walls and ceiling read as clean, even "
+            "white with no grey/blue/yellow cast; keep wood floors and warm materials naturally warm; "
+            "perform a realistic window pull on the EXISTING windows and glass doors so the outside "
+            "view (sky, garden, buildings, rooftops) is clearly visible and not blown out; correct lens "
+            "barrel distortion and vignetting (no dark corners) and level the verticals and horizon. "
+            "Increase clarity, micro-contrast and sharpness slightly and gently reduce noise. Keep it "
+            "photorealistic and true to the real room: do NOT add, remove, move or duplicate furniture "
+            "or objects, and never invent windows, doors, openings or views that do not already exist."
+        ),
+    },
 }
 
 STAGING_STYLES = {

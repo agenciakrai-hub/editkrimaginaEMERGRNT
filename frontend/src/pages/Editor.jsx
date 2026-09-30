@@ -18,14 +18,14 @@ import {
 import { motion } from "framer-motion";
 import {
   ArrowLeft, Zap, Loader2, Download, Undo2, ShieldCheck, GitCompareArrows, Image as ImageIcon,
-  Sun, Sparkles, SlidersHorizontal, Moon, Eraser, Trees, PanelTop, Sofa, Maximize, Wand2, Frame,
+  Sun, Sparkles, SlidersHorizontal, Moon, Eraser, Trees, PanelTop, Sofa, Maximize, Wand2, Frame, Stars,
 } from "lucide-react";
 import { toast } from "sonner";
 
 const ICONS = {
   auto: Wand2, sky: Sun, light: Sparkles, straighten: SlidersHorizontal, twilight: Moon,
   declutter: Eraser, lawn: Trees, window_pull: PanelTop, staging: Sofa, upscale: Maximize,
-  perspective_pro: Frame,
+  perspective_pro: Frame, auto_pro: Stars,
 };
 const STYLES = [
   { key: "nordico", label: "Nórdico" },
@@ -142,7 +142,7 @@ export default function Editor() {
 
   const hasEdits = photo.edits?.length > 0;
   const esenciales = actions.filter((a) => a.category === "esencial");
-  const premium = actions.filter((a) => a.category === "premium");
+  const premium = actions.filter((a) => a.category === "premium" && a.key !== "auto_pro");
   const ToolButton = ({ a }) => {
     const Icon = ICONS[a.key] || Sparkles;
     return (
@@ -280,14 +280,37 @@ export default function Editor() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-display font-semibold text-white">Mejora automática</span>
+                    <span className="font-display font-semibold text-white">Mejora rápida</span>
                     <span className="text-[10px] font-semibold text-emerald-400">GRATIS</span>
                   </div>
-                  <p className="text-xs text-slate-400 mt-0.5">Todas las mejoras esenciales en un clic</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Luz, color y blancos limpios en un clic</p>
                 </div>
                 <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
               </div>
             </button>
+
+            {actions.find((a) => a.key === "auto_pro") && (
+              <button
+                onClick={() => openConfirm(actions.find((a) => a.key === "auto_pro"))}
+                disabled={processing}
+                data-testid="apply-auto-pro-btn"
+                className="group w-full rounded-xl p-[1.5px] bg-gradient-to-r from-amber-400 via-fuchsia-500 to-cyan-400 disabled:opacity-50 hover:brightness-110 transition-[filter]"
+              >
+                <div className="rounded-[10px] bg-[#0d0b13] group-hover:bg-[#12101a] transition-colors p-4 flex items-center gap-3 text-left">
+                  <div className="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-amber-400 via-fuchsia-500 to-cyan-400 flex items-center justify-center">
+                    <Stars className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-display font-semibold text-white">Mejora Pro</span>
+                      <span className="text-[10px] font-semibold text-cyan-300 flex items-center gap-0.5"><Zap className="w-2.5 h-2.5" />{actions.find((a) => a.key === "auto_pro")?.cost}</span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">Acabado profesional con IA · recupera ventanas</p>
+                  </div>
+                  <Sparkles className="w-4 h-4 text-fuchsia-300 shrink-0" />
+                </div>
+              </button>
+            )}
 
             <div>
               <h3 className="text-xs uppercase tracking-[0.2em] font-semibold text-violet-400 mb-3">Esenciales · Gratis</h3>
