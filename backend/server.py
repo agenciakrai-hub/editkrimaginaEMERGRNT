@@ -97,6 +97,15 @@ async def get_tool_override(action_key: str):
         return None
     return prov, ov["model_id"]
 
+class ProviderEditError(RuntimeError):
+    """Safe, user-facing error for an explicitly selected external image engine."""
+
+    def __init__(self, provider: str, model: str, reason: str = ""):
+        self.provider = provider
+        self.model = model
+        self.reason = reason
+        super().__init__(f"provider_edit_failed:{provider}:{model}:{reason}")
+
 COOKIE_KW = dict(httponly=True, secure=True, samesite="none", path="/")
 
 
@@ -474,9 +483,21 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
             used_provider = prov.get("name") or prov.get("type")
             used_model = model_id
             gemini_calls = 0
-        except Exception:
-            logger.exception("provider override failed, falling back to default engine")
-            result_bytes = None
+        except Exception as e:
+            # An explicit provider override must never silently fall back to the
+            # Emergent/Gemini engine. A silent fallback can surface an unrelated
+            # "credits" error even though the configured provider is the one the
+            # administrator selected for this tool.
+            logger.exception(
+                "provider override failed: provider=%s model=%s",
+                prov.get("name") or prov.get("type"),
+                model_id,
+            )
+            raise ProviderEditError(
+                provider=prov.get("name") or prov.get("type") or "proveedor",
+                model=model_id,
+                reason=str(e)[:300],
+            ) from e
     if not result_bytes and not override and action_key in local_edit.SUPPORTED:
         # Essential (free) tools run locally — no AI API, no credits, no key balance.
         result_bytes = await asyncio.to_thread(local_edit.run, action_key, data)
@@ -529,6 +550,22 @@ async def edit_photo(photo_id: str, data: EditInput, user: dict = Depends(curren
     await db.photos.update_one({"id": photo_id}, {"$set": {"status": "processing"}})
     try:
         updated = await _apply_edit(photo, data.action, data.options, data.disclosure)
+    except ProviderEditError as e:
+        logger.error(
+            "selected provider edit failed: provider=%s model=%s reason=%s",
+            e.provider, e.model, e.reason,
+        )
+        if charge > 0:
+            await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": charge}})
+        await db.photos.update_one({"id": photo_id}, {"$set": {"status": "ready"}})
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"El motor seleccionado ({e.provider} · {e.model}) no pudo editar la imagen. "
+                "No se ha usado el motor Gemini ni se han consumido créditos de Emergent. "
+                "Revisa que el modelo seleccionado sea compatible con edición de imágenes."
+            ),
+        )
     except Exception:
         logger.exception("edit failed")
         if charge > 0:
