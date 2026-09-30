@@ -503,7 +503,7 @@ async def revert_photo(photo_id: str, user: dict = Depends(current_user)):
 async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: Optional[bool]):
     """Runs the AI edit on the photo's current image and persists a new result. Returns updated photo."""
     src_path = photo.get("current_path") or photo["original_path"]
-    data, _ = storage.get_object(src_path)
+    data, _ = await asyncio.to_thread(storage.get_object, src_path)
 
     override = await get_tool_override(action_key)
     result_bytes = None
@@ -550,9 +550,9 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     if not result_bytes:
         raise RuntimeError("no_image")
     if not is_local:
-        result_bytes = imaging.finalize_edit(result_bytes, data)
+        result_bytes = await asyncio.to_thread(imaging.finalize_edit, result_bytes, data)
     out_path = f"{storage.APP_NAME}/edits/{photo['user_id']}/{uuid.uuid4()}.jpg"
-    stored = storage.put_object(out_path, result_bytes, "image/jpeg")
+    stored = await asyncio.to_thread(storage.put_object, out_path, result_bytes, "image/jpeg")
     action = ai_edit.ACTIONS[action_key]
     disc = action["disclosure_default"] if disclosure is None else disclosure
     edit_entry = {"action": action_key, "label": action["label"], "at": datetime.now(timezone.utc).isoformat()}
