@@ -100,7 +100,7 @@ def _openai_edit(base_url: str, api_key: str, model_id: str, image_bytes: bytes,
     r = requests.post(
         base_url + "/images/edits",
         headers={"Authorization": f"Bearer {api_key}"},
-        files=files, data=data, timeout=90,
+        files=files, data=data, timeout=(10, 30),
     )
     r.raise_for_status()
     payload = r.json()
