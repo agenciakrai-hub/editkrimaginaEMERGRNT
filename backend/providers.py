@@ -95,12 +95,12 @@ def run_image_edit(provider: dict, model_id: str, image_bytes: bytes, prompt: st
 
 def _openai_edit(base_url: str, api_key: str, model_id: str, image_bytes: bytes, prompt: str) -> bytes:
     import base64
-    files = {"image": ("photo.png", io.BytesIO(image_bytes), "image/png")}
+    files = {"image": ("photo.jpg", io.BytesIO(image_bytes), "image/jpeg")}
     data = {"model": model_id, "prompt": prompt, "n": "1", "size": "auto"}
     r = requests.post(
         base_url + "/images/edits",
         headers={"Authorization": f"Bearer {api_key}"},
-        files=files, data=data, timeout=(10, 30),
+        files=files, data=data, timeout=(15, 180),
     )
     r.raise_for_status()
     payload = r.json()
