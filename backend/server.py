@@ -505,7 +505,10 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     src_path = photo.get("current_path") or photo["original_path"]
     data, _ = await asyncio.to_thread(storage.get_object, src_path)
 
-    override = await get_tool_override(action_key)
+    # Essential/free tools are deterministic local operations. Keep them local
+    # even if stale provider overrides exist in the database; provider overrides
+    # are reserved for AI/generative photo engines.
+    override = None if action_key in local_edit.SUPPORTED else await get_tool_override(action_key)
     result_bytes = None
     used_provider = "gemini"
     used_model = ai_edit.MODEL
