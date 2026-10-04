@@ -9,6 +9,7 @@ All functions here are synchronous (network I/O); callers must run them in a thr
 """
 import io
 import logging
+import json
 import requests
 
 logger = logging.getLogger("watchful.providers")
@@ -19,30 +20,106 @@ NVIDIA_FLUX2_KLEIN_URL = (
     "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
 )
 
-# Substrings that identify an image-generation/editing capable model.
-_IMAGE_HINTS = (
-    "image", "gpt-image", "dall-e", "dalle", "flux", "imagen", "nano-banana",
-    "stable-diffusion", "sdxl", "sd3", "seedream", "kontext", "qwen-image",
-    # KRAI is an OpenAI-compatible gateway used by this app; its model
-    # aliases can be image-capable even when the alias itself lacks "image".
-    "krai-",
+# Capability hints used only when the provider does not expose structured
+# input/output modalities. We intentionally do NOT classify generic vision/VLM
+# models as image editors: seeing an image is not the same as editing one.
+_IMAGE_EDIT_HINTS = (
+    "image-edit", "image_edit", "image/edit", "qwen-image-edit",
+    "flux.2-klein", "flux.1-kontext", "kontext", "seedream", "nano-banana/edit",
+    "instruct-pix2pix", "omnigen", "kolors-ip-adapter",
 )
+_VIDEO_HINTS = (
+    "text-to-video", "image-to-video", "video-to-video", "video-generation",
+    "video-edit", "video_edit", "wan2", "wan-", "hunyuanvideo", "ltx-video",
+    "cogvideo", "kling", "seedance", "vidu", "sora", "veo", "cosmos3-nano",
+    "cosmos-transfer", "animate-2", "lipsync", "video-super-resolution",
+)
+
+NVIDIA_MEDIA_CATALOG = [
+    {"id": "black-forest-labs/flux.2-klein-4b", "name": "FLUX.2 Klein 4B (Image Edit)", "kind": "image", "can_edit": True, "can_video": False},
+    {"id": "nvidia/qwen-image-edit-nvpcb-ovsl2sl", "name": "Qwen Image Edit NVIDIA PCB", "kind": "image", "can_edit": True, "can_video": False},
+    {"id": "nvidia/cosmos3-nano", "name": "Cosmos3 Nano (Video)", "kind": "video", "can_edit": False, "can_video": True},
+    {"id": "nvidia/cosmos-transfer2.5-2b", "name": "Cosmos Transfer 2.5 (Video)", "kind": "video", "can_edit": False, "can_video": True},
+    {"id": "wan-ai/wan2.2-animate-2-14b", "name": "Wan2.2 Animate 2 (Video)", "kind": "video", "can_edit": False, "can_video": True},
+]
 
 # Curated fal.ai catalogue (fal has no key-authed /models listing endpoint).
 FAL_MODELS = [
-    {"id": "fal-ai/nano-banana/edit", "name": "Nano Banana (edit)", "kind": "image", "can_edit": True},
+    {"id": "fal-ai/nano-banana/edit", "name": "Nano Banana (edit)", "kind": "image", "can_edit": True, "can_video": False},
     {"id": "fal-ai/gemini-25-flash-image/edit", "name": "Gemini 2.5 Flash Image (edit)", "kind": "image", "can_edit": True},
     {"id": "fal-ai/flux-pro/kontext", "name": "FLUX.1 Kontext (edit)", "kind": "image", "can_edit": True},
-    {"id": "fal-ai/flux/dev", "name": "FLUX.1 [dev]", "kind": "image", "can_edit": False},
+    {"id": "fal-ai/flux/dev", "name": "FLUX.1 [dev]", "kind": "image", "can_edit": False, "can_video": False},
     {"id": "fal-ai/qwen-image-edit", "name": "Qwen Image Edit", "kind": "image", "can_edit": True},
     {"id": "fal-ai/seedream/v4/edit", "name": "Seedream v4 (edit)", "kind": "image", "can_edit": True},
 ]
 
 
-def _kind_for(model_id: str):
-    low = (model_id or "").lower()
-    is_image = any(h in low for h in _IMAGE_HINTS)
-    return ("image" if is_image else "text"), is_image
+def _capabilities_for_model(model) -> tuple[str, bool, bool]:
+    """Return (kind, can_edit, can_video) from provider metadata first."""
+    if isinstance(model, dict):
+        mid = str(model.get("id") or "").strip()
+        raw = json.dumps(model, ensure_ascii=False, default=str).lower()
+    else:
+        mid = str(model or "").strip()
+        raw = mid.lower()
+
+    # These consume media but do not produce edited/generated media.
+    analysis_only = any(x in raw for x in (
+        "vision-language", "vision language", "vlm", "image-to-text",
+        "video understanding", "ocr", "embedding", "embed-", "retriever",
+        "rerank", "caption", "classification", "content-safety",
+        "topic-control", "guard", "asr", "translation",
+    ))
+
+    edit_signal = any(x in raw for x in (
+        "image editing", "image_edit", "image-edit", "image-to-image",
+        "image2image", "img2img", "inpainting", "outpainting",
+    ))
+    video_signal = any(x in raw for x in (
+        "text-to-video", "image-to-video", "video-to-video",
+        "video generation", "video-generation", "video editing",
+        "video-to-world", "output_video", "b64_video", "mp4",
+    ))
+
+    # Structured input/output metadata, when the provider exposes it.
+    has_input_image = any(x in raw for x in (
+        '"input_modalities": ["image"', '"input_modalities": ["text", "image"',
+        '"input": "image"', '"input_type": "image"', '"image" input',
+    ))
+    has_output_image = any(x in raw for x in (
+        '"output_modalities": ["image"', '"output": "image"',
+        '"output_type": "image"', '"b64_image"',
+    ))
+    structured_image_io = has_input_image and has_output_image
+
+    edit_name = any(h in mid.lower() for h in _IMAGE_EDIT_HINTS)
+    video_name = any(h in mid.lower() for h in _VIDEO_HINTS)
+
+    can_edit = not analysis_only and (edit_signal or structured_image_io or edit_name)
+    can_video = not analysis_only and (video_signal or video_name)
+
+    if can_edit:
+        return "image", True, False
+    if can_video:
+        return "video", False, True
+    return "other", False, False
+
+
+def _public_model(model) -> dict | None:
+    mid = model.get("id") if isinstance(model, dict) else str(model)
+    if not mid:
+        return None
+    kind, can_edit, can_video = _capabilities_for_model(model)
+    if not (can_edit or can_video):
+        return None
+    name = model.get("name", mid) if isinstance(model, dict) else mid
+    return {
+        "id": mid,
+        "name": name,
+        "kind": kind,
+        "can_edit": can_edit,
+        "can_video": can_video,
+    }
 
 
 def _norm(base_url: str) -> str:
@@ -92,13 +169,14 @@ def detect(provider_type: str, base_url: str, api_key: str) -> dict:
     try:
         payload = r.json()
         raw = payload.get("data", payload) if isinstance(payload, dict) else payload
+        if not isinstance(raw, list):
+            raw = []
+
         models = []
         for m in raw:
-            mid = m.get("id") if isinstance(m, dict) else str(m)
-            if not mid:
-                continue
-            kind, can_edit = _kind_for(mid)
-            models.append({"id": mid, "name": mid, "kind": kind, "can_edit": can_edit})
+            public = _public_model(m)
+            if public:
+                models.append(public)
 
         if _is_nvidia_openai_base(base_url):
             existing = {m["id"] for m in models}
@@ -106,7 +184,7 @@ def detect(provider_type: str, base_url: str, api_key: str) -> dict:
                 if m["id"] not in existing:
                     models.append(m)
 
-        models.sort(key=lambda x: (x["kind"] != "image", x["id"]))
+        models.sort(key=lambda x: (x["kind"] != "image", x["kind"] != "video", x["id"]))
         return {"status": "valid", "models": models}
     except Exception as e:
         logger.warning("provider detect parse error: %s", e)
