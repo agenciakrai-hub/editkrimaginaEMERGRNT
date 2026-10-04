@@ -13,6 +13,12 @@ import requests
 
 logger = logging.getLogger("watchful.providers")
 
+# NVIDIA hosted Visual GenAI endpoint for FLUX.2 Klein 4B.
+NVIDIA_FLUX2_KLEIN_MODEL = "black-forest-labs/flux.2-klein-4b"
+NVIDIA_FLUX2_KLEIN_URL = (
+    "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
+)
+
 # Substrings that identify an image-generation/editing capable model.
 _IMAGE_HINTS = (
     "image", "gpt-image", "dall-e", "dalle", "flux", "imagen", "nano-banana",
@@ -41,6 +47,22 @@ def _kind_for(model_id: str):
 
 def _norm(base_url: str) -> str:
     return (base_url or "").strip().rstrip("/")
+
+
+def _is_nvidia_openai_base(base_url: str) -> bool:
+    return _norm(base_url).lower() == "https://integrate.api.nvidia.com/v1"
+
+
+def _nvidia_catalog_models():
+    # NVIDIA's /v1/models endpoint currently exposes the LLM catalogue and does
+    # not list FLUX.2 Klein 4B. Add the hosted Visual GenAI model explicitly so
+    # the admin UI can route it through its image-specific endpoint.
+    return [{
+        "id": NVIDIA_FLUX2_KLEIN_MODEL,
+        "name": "FLUX.2 Klein 4B (NVIDIA Image Editing)",
+        "kind": "image",
+        "can_edit": True,
+    }]
 
 
 def detect(provider_type: str, base_url: str, api_key: str) -> dict:
@@ -77,6 +99,13 @@ def detect(provider_type: str, base_url: str, api_key: str) -> dict:
                 continue
             kind, can_edit = _kind_for(mid)
             models.append({"id": mid, "name": mid, "kind": kind, "can_edit": can_edit})
+
+        if _is_nvidia_openai_base(base_url):
+            existing = {m["id"] for m in models}
+            for m in _nvidia_catalog_models():
+                if m["id"] not in existing:
+                    models.append(m)
+
         models.sort(key=lambda x: (x["kind"] != "image", x["id"]))
         return {"status": "valid", "models": models}
     except Exception as e:
@@ -85,12 +114,21 @@ def detect(provider_type: str, base_url: str, api_key: str) -> dict:
 
 
 def run_image_edit(provider: dict, model_id: str, image_bytes: bytes, prompt: str) -> bytes:
-    """Run an image edit through an external provider. Returns PNG bytes or raises."""
+    """Run an image edit through an external provider. Returns image bytes or raises."""
     ptype = provider.get("type")
     api_key = provider.get("api_key")
+    base_url = _norm(provider.get("base_url"))
+
     if ptype == "fal":
         return _fal_edit(api_key, model_id, image_bytes, prompt)
-    return _openai_edit(_norm(provider.get("base_url")), api_key, model_id, image_bytes, prompt)
+
+    # NVIDIA's hosted FLUX.2 Klein endpoint is not exposed through the normal
+    # OpenAI-compatible /images/edits route. It requires its Visual GenAI URL
+    # and a JSON body containing the image(s).
+    if _is_nvidia_openai_base(base_url) and model_id == NVIDIA_FLUX2_KLEIN_MODEL:
+        return _nvidia_flux2_edit(api_key, image_bytes, prompt)
+
+    return _openai_edit(base_url, api_key, model_id, image_bytes, prompt)
 
 
 def _openai_edit(base_url: str, api_key: str, model_id: str, image_bytes: bytes, prompt: str) -> bytes:
@@ -112,6 +150,66 @@ def _openai_edit(base_url: str, api_key: str, model_id: str, image_bytes: bytes,
         img.raise_for_status()
         return img.content
     raise RuntimeError("provider_no_image")
+
+
+def _nvidia_flux2_edit(api_key: str, image_bytes: bytes, prompt: str) -> bytes:
+    """Edit a user image through NVIDIA's hosted FLUX.2 Klein 4B endpoint.
+
+    NVIDIA documents this endpoint separately from /v1/models and /v1/chat.
+    The hosted Preview API currently documents a restricted image input set;
+    if NVIDIA rejects a user-provided image, the error is surfaced to the app
+    rather than silently falling back to Gemini.
+    """
+    import base64
+
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    payload = {
+        "mode": "Image Editing",
+        "prompt": prompt,
+        "image": [f"data:image/jpeg;base64,{image_b64}"],
+        "n": 1,
+        "samples": 1,
+        "response_format": "b64_json",
+        "seed": 0,
+        "steps": 4,
+        "width": 1024,
+        "height": 1024,
+    }
+    r = requests.post(
+        NVIDIA_FLUX2_KLEIN_URL,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=(20, 240),
+    )
+    if r.status_code >= 400:
+        detail = r.text[:1000]
+        raise RuntimeError(f"nvidia_flux2_http_{r.status_code}:{detail}")
+
+    payload_out = r.json()
+
+    # OpenAI-compatible response shape.
+    data = payload_out.get("data") if isinstance(payload_out, dict) else None
+    if isinstance(data, list) and data:
+        item = data[0] if isinstance(data[0], dict) else {}
+        if item.get("b64_json"):
+            return base64.b64decode(item["b64_json"])
+        if item.get("url"):
+            img = requests.get(item["url"], timeout=60)
+            img.raise_for_status()
+            return img.content
+
+    # NIM Visual GenAI response shape.
+    artifacts = payload_out.get("artifacts") if isinstance(payload_out, dict) else None
+    if isinstance(artifacts, list) and artifacts:
+        item = artifacts[0] if isinstance(artifacts[0], dict) else {}
+        if item.get("base64"):
+            return base64.b64decode(item["base64"])
+
+    raise RuntimeError("nvidia_flux2_no_image")
 
 
 def _fal_edit(api_key: str, model_id: str, image_bytes: bytes, prompt: str) -> bytes:
