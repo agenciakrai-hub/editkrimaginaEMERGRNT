@@ -38,6 +38,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("watchful")
 
 app = FastAPI(title="Watchful API")
+
+
+@app.get("/health")
+async def health():
+    """Health endpoint used by Emergent/nginx readiness checks."""
+    return {"status": "ok"}
+
+
 api = APIRouter(prefix="/api")
 
 FREE_CREDITS = 30
