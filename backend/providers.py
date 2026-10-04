@@ -131,15 +131,10 @@ def _is_nvidia_openai_base(base_url: str) -> bool:
 
 
 def _nvidia_catalog_models():
-    # NVIDIA's /v1/models endpoint currently exposes the LLM catalogue and does
-    # not list FLUX.2 Klein 4B. Add the hosted Visual GenAI model explicitly so
-    # the admin UI can route it through its image-specific endpoint.
-    return [{
-        "id": NVIDIA_FLUX2_KLEIN_MODEL,
-        "name": "FLUX.2 Klein 4B (NVIDIA Image Editing)",
-        "kind": "image",
-        "can_edit": True,
-    }]
+    # NVIDIA's OpenAI-compatible /v1/models catalogue does not reliably expose
+    # hosted media endpoints. Keep known media endpoints explicit so a valid
+    # NVIDIA provider never degrades to an LLM-only list.
+    return [dict(m) for m in NVIDIA_MEDIA_CATALOG]
 
 
 def detect(provider_type: str, base_url: str, api_key: str) -> dict:
