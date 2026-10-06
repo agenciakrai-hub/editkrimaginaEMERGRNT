@@ -271,21 +271,23 @@ def register_admin_routes(api, db, current_user, action_catalog):
         settings = await db.ai_settings.find_one({"id": "tool_overrides"}, {"_id": 0}) or {}
         overrides = settings.get("overrides", {})
         provs = await db.ai_providers.find({}, {"_id": 0}).to_list(100)
-        # Engine options grouped by REAL capability (not manual toggles):
-        #   photo_models -> can edit images (image -> image)
-        #   video_models -> can produce video
+        # Engine options: auto-detected capability OR an admin manual enable.
+        #   photo_models -> can edit images (image -> image) or manually enabled for Foto
+        #   video_models -> can produce video or manually enabled for Vídeo
         photo_models, video_models = [], []
         for p in provs:
+            en = p.get("enabled", {})
             for m in p.get("models", []):
                 caps = ai_providers._ensure_caps(m)
+                man = en.get(m["id"], {})
                 entry = {
                     "provider_id": p["id"], "provider_name": p["name"],
                     "model_id": m["id"], "model_name": m.get("name", m["id"]),
                     "status": p.get("status"),
                 }
-                if caps.get("image_edit"):
+                if caps.get("image_edit") or man.get("photo"):
                     photo_models.append(entry)
-                if caps.get("video"):
+                if caps.get("video") or man.get("video"):
                     video_models.append(dict(entry))
         # Free local tools run on-device and cannot be routed to a provider, so they
         # are not listed. Every AI tool (incl. Mejora Pro / Perspectiva Pro) IS listed.
@@ -311,8 +313,10 @@ def register_admin_routes(api, db, current_user, action_catalog):
             model = next((m for m in provider.get("models", []) if m.get("id") == data.model_id), None)
             if not model:
                 raise HTTPException(status_code=400, detail="Modelo no encontrado en el proveedor")
-            if not ai_providers._ensure_caps(model).get("image_edit"):
-                raise HTTPException(status_code=400, detail="El modelo seleccionado no puede editar imágenes (imagen → imagen)")
+            caps = ai_providers._ensure_caps(model)
+            manual = provider.get("enabled", {}).get(data.model_id, {}).get("photo")
+            if not (caps.get("image_edit") or manual):
+                raise HTTPException(status_code=400, detail="El modelo seleccionado no puede editar imágenes. Márcalo manualmente como editor en la tarjeta del proveedor si sabes que lo soporta.")
             overrides[data.action] = {"provider_id": data.provider_id, "model_id": data.model_id}
         else:
             overrides.pop(data.action, None)

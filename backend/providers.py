@@ -85,12 +85,14 @@ _REGISTRY = [
 # These are MERGED into the detected list so media models always surface.
 # Generic: add future providers/models here, no code changes needed elsewhere.
 _PROVIDER_CATALOG = {
-    "integrate.api.nvidia.com": [
+    "nvidia.com": [
         {"id": "black-forest-labs/flux.2-klein-4b", "name": "FLUX.2 Klein 4B",
          "capabilities": _caps(image_edit=True, image_generation=True)},
         {"id": "black-forest-labs/flux.1-kontext-dev", "name": "FLUX.1 Kontext [dev]",
          "capabilities": _caps(image_edit=True, image_generation=True)},
         {"id": "black-forest-labs/flux.1-dev", "name": "FLUX.1 [dev]",
+         "capabilities": _caps(image_generation=True)},
+        {"id": "black-forest-labs/flux.1-schnell", "name": "FLUX.1 [schnell]",
          "capabilities": _caps(image_generation=True)},
         {"id": "stabilityai/stable-diffusion-3.5-large", "name": "Stable Diffusion 3.5 Large",
          "capabilities": _caps(image_generation=True)},
@@ -202,13 +204,18 @@ def _finalize_model(mid: str, name: str, caps: dict) -> dict:
 
 
 def _merge_catalog(models: list, base_url: str) -> list:
-    """Merge supplemental per-provider media models that /v1/models omits."""
-    extra = _PROVIDER_CATALOG.get(_host(base_url), [])
+    """Merge supplemental per-provider media models that /v1/models omits.
+    Host is matched by substring so any NVIDIA/other subdomain is covered."""
+    host = _host(base_url)
     have = {m["id"] for m in models}
-    for e in extra:
-        if e["id"] in have:
+    for key, extra in _PROVIDER_CATALOG.items():
+        if key not in host:
             continue
-        models.append(_finalize_model(e["id"], e.get("name"), e["capabilities"]))
+        for e in extra:
+            if e["id"] in have:
+                continue
+            models.append(_finalize_model(e["id"], e.get("name"), e["capabilities"]))
+            have.add(e["id"])
     return models
 
 

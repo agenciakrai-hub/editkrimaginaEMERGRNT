@@ -136,7 +136,8 @@ async def get_tool_override(action_key: str):
             reason="El modelo seleccionado ya no está disponible en el proveedor.",
         )
     caps = ai_providers._ensure_caps(model)
-    if not caps.get("image_edit"):
+    manual = prov.get("enabled", {}).get(ov["model_id"], {}).get("photo")
+    if not (caps.get("image_edit") or manual):
         raise ProviderEditError(
             provider=prov.get("name") or prov.get("type") or "proveedor",
             model=ov["model_id"],

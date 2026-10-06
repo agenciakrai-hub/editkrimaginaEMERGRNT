@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -103,15 +104,22 @@ function CapBadge({ children, cls }) {
   return <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${cls}`}>{children}</span>;
 }
 
-function ModelRow({ m }) {
+function ModelRow({ m, en, onToggle }) {
   const c = m.capabilities || {};
+  const photoOn = c.image_edit || !!en?.photo;
+  const videoOn = c.video || !!en?.video;
   return (
     <div className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.03] px-3 py-2" data-testid={`model-row-${m.id}`}>
       <p className="text-sm text-white truncate min-w-0">{m.name}</p>
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
         {c.image_edit && <CapBadge cls="bg-cyan-500/20 text-cyan-300">EDICIÓN</CapBadge>}
         {c.image_generation && <CapBadge cls="bg-violet-500/20 text-violet-300">GENERACIÓN</CapBadge>}
         {c.video && <CapBadge cls="bg-fuchsia-500/20 text-fuchsia-300">VÍDEO</CapBadge>}
+        <label className="flex items-center gap-1 text-[10px] text-slate-400" title="Usar en herramientas de foto">
+          <ImageIcon className="w-3 h-3" />
+          <Switch data-testid={`model-photo-${m.id}`} checked={photoOn} disabled={c.image_edit}
+            onCheckedChange={(v) => onToggle(m.id, "photo", v)} />
+        </label>
       </div>
     </div>
   );
@@ -121,6 +129,7 @@ function ProviderCard({ provider, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [showOthers, setShowOthers] = useState(false);
   const st = STATUS[provider.status] || STATUS.unknown;
+  const enabled = provider.enabled || {};
 
   const refresh = async () => {
     setBusy(true);
@@ -129,6 +138,10 @@ function ProviderCard({ provider, onChanged }) {
   };
   const del = async () => {
     try { await api.delete(`/admin/providers/${provider.id}`); toast.success("Proveedor eliminado"); onChanged(); }
+    catch (err) { toast.error(apiError(err)); }
+  };
+  const toggle = async (model_id, field, value) => {
+    try { await api.put(`/admin/providers/${provider.id}/models`, { model_id, [field]: value }); toast.success(value ? "Modelo habilitado" : "Modelo deshabilitado"); onChanged(); }
     catch (err) { toast.error(apiError(err)); }
   };
 
@@ -165,7 +178,7 @@ function ProviderCard({ provider, onChanged }) {
             <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-slate-400 mb-1.5">
               <ImageIcon className="w-3.5 h-3.5 text-cyan-400" /> Imagen · {imageModels.length}
             </p>
-            <div className="space-y-1.5">{imageModels.map((m) => <ModelRow key={m.id} m={m} />)}</div>
+            <div className="space-y-1.5">{imageModels.map((m) => <ModelRow key={m.id} m={m} en={enabled[m.id]} onToggle={toggle} />)}</div>
           </div>
         )}
 
@@ -174,7 +187,7 @@ function ProviderCard({ provider, onChanged }) {
             <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-slate-400 mb-1.5">
               <Film className="w-3.5 h-3.5 text-fuchsia-400" /> Vídeo · {videoModels.length}
             </p>
-            <div className="space-y-1.5">{videoModels.map((m) => <ModelRow key={m.id} m={m} />)}</div>
+            <div className="space-y-1.5">{videoModels.map((m) => <ModelRow key={m.id} m={m} en={enabled[m.id]} onToggle={toggle} />)}</div>
           </div>
         )}
 
@@ -182,12 +195,15 @@ function ProviderCard({ provider, onChanged }) {
           <div>
             <button data-testid={`toggle-others-${provider.id}`} onClick={() => setShowOthers((v) => !v)}
               className="text-xs text-slate-500 hover:text-slate-300">
-              {showOthers ? "▾" : "▸"} Otros modelos detectados · {others.length} (texto/visión, no usables en foto/vídeo)
+              {showOthers ? "▾" : "▸"} Otros modelos detectados · {others.length} — actívalos como editor si sabes que lo soportan
             </button>
-            {showOthers && <div className="space-y-1.5 mt-1.5 opacity-70">{others.map((m) => (
+            {showOthers && <div className="space-y-1.5 mt-1.5">{others.map((m) => (
               <div key={m.id} className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-1.5">
-                <p className="text-xs text-slate-400 truncate">{m.name}</p>
-                <span className="text-[9px] text-slate-600 uppercase">{m.kind}</span>
+                <p className="text-xs text-slate-400 truncate min-w-0">{m.name} <span className="text-[9px] text-slate-600 uppercase ml-1">{m.kind}</span></p>
+                <label className="flex items-center gap-1 text-[10px] text-slate-400 shrink-0" title="Forzar uso en herramientas de foto">
+                  <ImageIcon className="w-3 h-3" /> Foto
+                  <Switch data-testid={`model-photo-${m.id}`} checked={!!enabled[m.id]?.photo} onCheckedChange={(v) => toggle(m.id, "photo", v)} />
+                </label>
               </div>
             ))}</div>}
           </div>

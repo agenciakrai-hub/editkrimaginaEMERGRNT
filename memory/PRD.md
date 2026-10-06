@@ -108,6 +108,12 @@ Plataforma web/PWA en español para que agentes, agencias y fotógrafos inmobili
 - [x] Fiabilidad: motor principal `gemini-3.1-flash-image-preview` (rápido, ~8s, probado en prod) con **respaldo automático a `gemini-3-pro-image-preview`** si falla, + timeout controlado (`AI_EDIT_TIMEOUT`). Configurable con env `AI_IMAGE_MODEL` / `AI_IMAGE_FALLBACK_MODEL`.
 - Nota: todas las ediciones IA se pagan del saldo de la Universal Key (EMERGENT_LLM_KEY). Si en prod fallan tras republicar, recargar saldo.
 
+## Selección de proveedor por herramienta + control manual (2026-06)
+- La selección por herramienta ya existía ("Motor por herramienta"); el bloqueo era que ningún modelo se ofrecía porque se clasificaban como texto/visión.
+- [x] Catálogo NVIDIA ahora se MERGEA por substring de host ("nvidia.com" cubre integrate.api / ai.api) → FLUX.2 Klein y Kontext aparecen aunque /v1/models solo liste LLMs. Verificado.
+- [x] **Control manual**: cada modelo (incluidos los de "Otros modelos detectados") tiene un interruptor "Usar en foto". `photo_models`/`video_models` incluyen modelos con capacidad auto O habilitados manualmente. `admin_set_override` y `get_tool_override` aceptan capability image_edit O enable manual. Verificado e2e: un modelo mal clasificado como texto se habilita manualmente → aparece seleccionable → asignable a una herramienta (200).
+- Resultado: el admin puede asignar el proveedor/modelo que quiera a cada herramienta de IA.
+
 ## Reconstrucción detección de modelos por CAPACIDAD + proveedores (2026-06)
 Rediseño genérico y escalable del sistema de proveedores IA (sin parches por modelo):
 - `providers.py`: clasificación por capacidad real `{image_edit, image_generation, video, vision, text}`. Prioridad: (1) modalidades del proveedor (input/output_modalities, architecture.modality), (2) registro genérico `_REGISTRY` por substrings (kontext, qwen-image-edit, flux.2, seedream, dall-e, sdxl, flux dev, video/kling/ltx/wan, vision/llava/pixtral/vl…), (3) nombre como fallback. `kind` y `can_edit`/`can_video` se DERIVAN de capabilities (una sola fuente de verdad).
