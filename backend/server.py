@@ -567,10 +567,13 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
         is_local = False
     if not result_bytes:
         raise RuntimeError("no_image")
-    if not is_local:
+    preserve_original = bool(override and ai_providers.is_krai_gateway(override[0].get("base_url")))
+    if not is_local and not preserve_original:
         result_bytes = await asyncio.to_thread(imaging.finalize_edit, result_bytes, data)
-    out_path = f"{storage.APP_NAME}/edits/{photo['user_id']}/{uuid.uuid4()}.jpg"
-    stored = await asyncio.to_thread(storage.put_object, out_path, result_bytes, "image/jpeg")
+    output_mime = ai_providers.image_mime(result_bytes) if preserve_original else "image/jpeg"
+    output_ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[output_mime]
+    out_path = f"{storage.APP_NAME}/edits/{photo['user_id']}/{uuid.uuid4()}.{output_ext}"
+    stored = await asyncio.to_thread(storage.put_object, out_path, result_bytes, output_mime)
     action = ai_edit.ACTIONS[action_key]
     disc = action["disclosure_default"] if disclosure is None else disclosure
     edit_entry = {"action": action_key, "label": action["label"], "at": datetime.now(timezone.utc).isoformat()}

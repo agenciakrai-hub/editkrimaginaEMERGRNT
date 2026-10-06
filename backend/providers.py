@@ -171,6 +171,12 @@ def _caps_from_name(model_id: str) -> dict:
 def classify(meta, provider_host: str = "") -> dict:
     """Classify one model's capabilities. Priority: provider modality metadata,
     then the generic model registry, then a text fallback."""
+    if isinstance(meta, dict) and isinstance(meta.get("capabilities"), list):
+        tasks = set(meta["capabilities"])
+        return _caps(image_edit="image_edit" in tasks,
+                     image_generation="image_generation" in tasks,
+                     video="video_generation" in tasks,
+                     vision="vision" in tasks, text="text" in tasks)
     mid = meta.get("id") if isinstance(meta, dict) else str(meta)
     inp, out = _modalities(meta if isinstance(meta, dict) else {})
     caps = _caps_from_modalities(inp, out)
@@ -264,6 +270,8 @@ def detect(provider_type: str, base_url: str, api_key: str) -> dict:
     host = _host(base_url)
     models = []
     for m in raw:
+        if is_krai_gateway(base_url) and isinstance(m, dict) and m.get("object") == "web_target":
+            continue
         mid = m.get("id") if isinstance(m, dict) else str(m)
         if not mid:
             continue
@@ -287,9 +295,64 @@ def run_image_edit(provider: dict, model_id: str, image_bytes: bytes, prompt: st
     """Run an image edit through an external provider. Returns PNG bytes or raises."""
     ptype = provider.get("type")
     api_key = provider.get("api_key")
+    if is_krai_gateway(provider.get("base_url")):
+        return _krai_edit(_norm(provider.get("base_url")), api_key, model_id, image_bytes, prompt)
     if ptype == "fal":
         return _fal_edit(api_key, model_id, image_bytes, prompt)
     return _openai_edit(_norm(provider.get("base_url")), api_key, model_id, image_bytes, prompt)
+
+
+def is_krai_gateway(base_url: str) -> bool:
+    from urllib.parse import urlparse
+    url = urlparse(_norm(base_url))
+    return url.scheme == "https" and url.path == "/api/gateway/v1"
+
+
+def image_mime(data: bytes) -> str:
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    raise RuntimeError("Formato de imagen no válido: usa JPEG, PNG o WebP.")
+
+
+def _krai_edit(base_url, api_key, model_id, image_bytes, prompt):
+    import base64
+    import uuid
+    if not image_bytes or len(image_bytes) > 8 * 1024 * 1024:
+        raise RuntimeError("La fotografía debe ocupar como máximo 8 MiB.")
+    mime = image_mime(image_bytes)
+    try:
+        response = requests.post(base_url + "/execute",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"task": "image_edit", "engine_hint": model_id,
+                  "input": {"prompt": prompt, "image_b64": base64.b64encode(image_bytes).decode("ascii"),
+                            "image_mime_type": mime},
+                  "options": {"timeout_ms": 60000}, "client_request_id": str(uuid.uuid4())},
+            timeout=(10, 90))
+    except requests.Timeout as exc:
+        raise RuntimeError("Tiempo de edición agotado. Comprueba Gemini antes de repetir.") from exc
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise RuntimeError(f"KRAI respondió HTTP {response.status_code} sin una respuesta válida.") from exc
+    if response.status_code >= 400 or payload.get("ok") is not True:
+        detail = payload.get("detail") or payload.get("message") or payload.get("error") or f"HTTP {response.status_code}"
+        if isinstance(detail, dict):
+            detail = detail.get("message") or detail.get("detail") or f"HTTP {response.status_code}"
+        raise RuntimeError(str(detail).replace(api_key or "\0", "[clave oculta]")[:300])
+    for item in payload.get("artifacts") or []:
+        if item.get("type") == "image" and item.get("data_b64"):
+            try:
+                result = base64.b64decode(item["data_b64"], validate=True)
+            except ValueError as exc:
+                raise RuntimeError("KRAI devolvió una imagen dañada.") from exc
+            if image_mime(result) != item.get("mime_type"):
+                raise RuntimeError("KRAI devolvió un formato de imagen incoherente.")
+            return result
+    raise RuntimeError("KRAI terminó sin devolver una fotografía.")
 
 
 def _openai_edit(base_url: str, api_key: str, model_id: str, image_bytes: bytes, prompt: str) -> bytes:
