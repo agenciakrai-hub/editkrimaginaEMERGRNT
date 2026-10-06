@@ -37,8 +37,24 @@ db = client[os.environ['DB_NAME']]
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("watchful")
 
+# Free local tools (auto, light, sky, straighten) always run on-device (OpenCV):
+# zero credits, deterministic, and independent of any AI provider override.
+# Every AI tool — including the one-click "Mejora Pro" / "Perspectiva Pro" — can be
+# routed to ANY admin-selected provider; if none is selected it defaults to Gemini.
+BYPASS_OVERRIDE = set(local_edit.SUPPORTED)
+
 app = FastAPI(title="Watchful API")
 api = APIRouter(prefix="/api")
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+@api.get("/health")
+async def api_health():
+    return {"status": "ok"}
 
 FREE_CREDITS = 30
 OWNER_EMAILS = {
@@ -119,17 +135,12 @@ async def get_tool_override(action_key: str):
             model=ov["model_id"],
             reason="El modelo seleccionado ya no está disponible en el proveedor.",
         )
-    if not model.get("can_edit"):
+    caps = ai_providers._ensure_caps(model)
+    if not caps.get("image_edit"):
         raise ProviderEditError(
             provider=prov.get("name") or prov.get("type") or "proveedor",
             model=ov["model_id"],
-            reason="El modelo seleccionado no está habilitado para edición de imágenes.",
-        )
-    if not prov.get("enabled", {}).get(ov["model_id"], {}).get("photo"):
-        raise ProviderEditError(
-            provider=prov.get("name") or prov.get("type") or "proveedor",
-            model=ov["model_id"],
-            reason="El modelo seleccionado no está habilitado para Foto.",
+            reason="El modelo seleccionado no puede editar imágenes (imagen → imagen).",
         )
     return prov, ov["model_id"]
 
@@ -508,7 +519,10 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     # Essential/free tools are deterministic local operations. Keep them local
     # even if stale provider overrides exist in the database; provider overrides
     # are reserved for AI/generative photo engines.
-    override = None if action_key in local_edit.SUPPORTED else await get_tool_override(action_key)
+    # The one-click "pro" enhancement tools always use the reliable built-in
+    # Emergent (Gemini) engine and ignore provider overrides, so a broken/unavailable
+    # custom provider never blocks them.
+    override = None if action_key in BYPASS_OVERRIDE else await get_tool_override(action_key)
     result_bytes = None
     used_provider = "gemini"
     used_model = ai_edit.MODEL

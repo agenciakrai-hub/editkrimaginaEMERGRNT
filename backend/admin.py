@@ -66,11 +66,19 @@ def _plan_public(p: dict) -> dict:
 
 def _provider_public(p: dict) -> dict:
     key = p.get("api_key") or ""
+    models = []
+    for m in (p.get("models", []) or []):
+        caps = ai_providers._ensure_caps(m)
+        models.append({
+            "id": m.get("id"), "name": m.get("name", m.get("id")),
+            "capabilities": caps, "kind": ai_providers._kind_from_caps(caps),
+            "can_edit": caps.get("image_edit", False), "can_video": caps.get("video", False),
+        })
     return {
         "id": p["id"], "name": p["name"], "type": p.get("type"),
         "base_url": p.get("base_url", ""), "status": p.get("status", "unknown"),
         "key_hint": ("••••" + key[-4:]) if len(key) >= 4 else "••••",
-        "models": p.get("models", []), "enabled": p.get("enabled", {}),
+        "models": models, "enabled": p.get("enabled", {}),
         "last_checked": p.get("last_checked"),
         "error": p.get("error"),
     }
@@ -263,22 +271,30 @@ def register_admin_routes(api, db, current_user, action_catalog):
         settings = await db.ai_settings.find_one({"id": "tool_overrides"}, {"_id": 0}) or {}
         overrides = settings.get("overrides", {})
         provs = await db.ai_providers.find({}, {"_id": 0}).to_list(100)
-        # Photo-capable options: models toggled for photo, per provider.
-        photo_models = []
+        # Engine options grouped by REAL capability (not manual toggles):
+        #   photo_models -> can edit images (image -> image)
+        #   video_models -> can produce video
+        photo_models, video_models = [], []
         for p in provs:
-            enabled = p.get("enabled", {})
             for m in p.get("models", []):
-                if enabled.get(m["id"], {}).get("photo"):
-                    photo_models.append({
-                        "provider_id": p["id"], "provider_name": p["name"],
-                        "model_id": m["id"], "model_name": m.get("name", m["id"]),
-                        "status": p.get("status"),
-                    })
+                caps = ai_providers._ensure_caps(m)
+                entry = {
+                    "provider_id": p["id"], "provider_name": p["name"],
+                    "model_id": m["id"], "model_name": m.get("name", m["id"]),
+                    "status": p.get("status"),
+                }
+                if caps.get("image_edit"):
+                    photo_models.append(entry)
+                if caps.get("video"):
+                    video_models.append(dict(entry))
+        # Free local tools run on-device and cannot be routed to a provider, so they
+        # are not listed. Every AI tool (incl. Mejora Pro / Perspectiva Pro) IS listed.
+        _fixed = {"auto", "light", "sky", "straighten"}
         tools = [
             {"action": k, "label": v["label"], "category": v["category"], "cost": v["cost"]}
-            for k, v in action_catalog.items()
+            for k, v in action_catalog.items() if k not in _fixed
         ]
-        return {"tools": tools, "overrides": overrides, "photo_models": photo_models}
+        return {"tools": tools, "overrides": overrides, "photo_models": photo_models, "video_models": video_models}
 
     @api.put("/admin/tool-overrides")
     async def admin_set_override(data: ToolOverrideInput, _: dict = Depends(require_admin)):
@@ -295,10 +311,8 @@ def register_admin_routes(api, db, current_user, action_catalog):
             model = next((m for m in provider.get("models", []) if m.get("id") == data.model_id), None)
             if not model:
                 raise HTTPException(status_code=400, detail="Modelo no encontrado en el proveedor")
-            if not provider.get("enabled", {}).get(data.model_id, {}).get("photo"):
-                raise HTTPException(status_code=400, detail="Activa primero el modelo para Foto")
-            if not model.get("can_edit"):
-                raise HTTPException(status_code=400, detail="El modelo seleccionado no está marcado como compatible con edición de imágenes")
+            if not ai_providers._ensure_caps(model).get("image_edit"):
+                raise HTTPException(status_code=400, detail="El modelo seleccionado no puede editar imágenes (imagen → imagen)")
             overrides[data.action] = {"provider_id": data.provider_id, "model_id": data.model_id}
         else:
             overrides.pop(data.action, None)

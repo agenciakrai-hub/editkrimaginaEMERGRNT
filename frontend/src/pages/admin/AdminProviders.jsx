@@ -3,7 +3,6 @@ import { api, apiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -100,8 +99,27 @@ function AddProviderDialog({ onSaved }) {
   );
 }
 
+function CapBadge({ children, cls }) {
+  return <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${cls}`}>{children}</span>;
+}
+
+function ModelRow({ m }) {
+  const c = m.capabilities || {};
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.03] px-3 py-2" data-testid={`model-row-${m.id}`}>
+      <p className="text-sm text-white truncate min-w-0">{m.name}</p>
+      <div className="flex items-center gap-1 shrink-0">
+        {c.image_edit && <CapBadge cls="bg-cyan-500/20 text-cyan-300">EDICIÓN</CapBadge>}
+        {c.image_generation && <CapBadge cls="bg-violet-500/20 text-violet-300">GENERACIÓN</CapBadge>}
+        {c.video && <CapBadge cls="bg-fuchsia-500/20 text-fuchsia-300">VÍDEO</CapBadge>}
+      </div>
+    </div>
+  );
+}
+
 function ProviderCard({ provider, onChanged }) {
   const [busy, setBusy] = useState(false);
+  const [showOthers, setShowOthers] = useState(false);
   const st = STATUS[provider.status] || STATUS.unknown;
 
   const refresh = async () => {
@@ -113,12 +131,12 @@ function ProviderCard({ provider, onChanged }) {
     try { await api.delete(`/admin/providers/${provider.id}`); toast.success("Proveedor eliminado"); onChanged(); }
     catch (err) { toast.error(apiError(err)); }
   };
-  const toggle = async (model_id, field, value) => {
-    try { await api.put(`/admin/providers/${provider.id}/models`, { model_id, [field]: value }); onChanged(); }
-    catch (err) { toast.error(apiError(err)); }
-  };
 
-  const enabled = provider.enabled || {};
+  const models = provider.models || [];
+  const imageModels = models.filter((m) => m.capabilities?.image_edit || m.capabilities?.image_generation);
+  const videoModels = models.filter((m) => m.capabilities?.video);
+  const others = models.filter((m) => !m.capabilities?.image_edit && !m.capabilities?.image_generation && !m.capabilities?.video);
+
   return (
     <div className="rounded-2xl border border-white/5 bg-[#15131C] p-5" data-testid={`provider-card-${provider.id}`}>
       <div className="flex items-start justify-between">
@@ -139,30 +157,41 @@ function ProviderCard({ provider, onChanged }) {
         </div>
       </div>
 
-      <div className="mt-4 max-h-72 overflow-y-auto pr-1 space-y-1.5">
-        {(provider.models || []).length === 0 && <p className="text-sm text-slate-500">No se detectaron modelos.</p>}
-        {(provider.models || []).map((m) => {
-          const e = enabled[m.id] || {};
-          return (
-            <div key={m.id} className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.03] px-3 py-2">
-              <div className="min-w-0">
-                <p className="text-sm text-white truncate">{m.name}</p>
-                <p className="text-[10px] text-slate-500">{m.kind}{m.can_edit ? " · editable" : ""}</p>
+      <div className="mt-4 max-h-80 overflow-y-auto pr-1 space-y-3">
+        {models.length === 0 && <p className="text-sm text-slate-500">No se detectaron modelos.</p>}
+
+        {imageModels.length > 0 && (
+          <div>
+            <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-slate-400 mb-1.5">
+              <ImageIcon className="w-3.5 h-3.5 text-cyan-400" /> Imagen · {imageModels.length}
+            </p>
+            <div className="space-y-1.5">{imageModels.map((m) => <ModelRow key={m.id} m={m} />)}</div>
+          </div>
+        )}
+
+        {videoModels.length > 0 && (
+          <div>
+            <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-slate-400 mb-1.5">
+              <Film className="w-3.5 h-3.5 text-fuchsia-400" /> Vídeo · {videoModels.length}
+            </p>
+            <div className="space-y-1.5">{videoModels.map((m) => <ModelRow key={m.id} m={m} />)}</div>
+          </div>
+        )}
+
+        {others.length > 0 && (
+          <div>
+            <button data-testid={`toggle-others-${provider.id}`} onClick={() => setShowOthers((v) => !v)}
+              className="text-xs text-slate-500 hover:text-slate-300">
+              {showOthers ? "▾" : "▸"} Otros modelos detectados · {others.length} (texto/visión, no usables en foto/vídeo)
+            </button>
+            {showOthers && <div className="space-y-1.5 mt-1.5 opacity-70">{others.map((m) => (
+              <div key={m.id} className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-1.5">
+                <p className="text-xs text-slate-400 truncate">{m.name}</p>
+                <span className="text-[9px] text-slate-600 uppercase">{m.kind}</span>
               </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <label className="flex items-center gap-1.5 text-xs text-slate-400" title="Disponible para herramientas de foto">
-                  <ImageIcon className="w-3.5 h-3.5" />
-                  <Switch data-testid={`model-photo-${provider.id}-${m.id}`} checked={!!e.photo} onCheckedChange={(v) => toggle(m.id, "photo", v)} />
-                </label>
-                <label className="flex items-center gap-1.5 text-xs text-slate-500" title="Vídeo (próximamente)">
-                  <Film className="w-3.5 h-3.5" />
-                  <Switch data-testid={`model-video-${provider.id}-${m.id}`} checked={!!e.video} onCheckedChange={(v) => toggle(m.id, "video", v)} />
-                  <span className="text-[9px] uppercase tracking-wide text-slate-600">pronto</span>
-                </label>
-              </div>
-            </div>
-          );
-        })}
+            ))}</div>}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -252,7 +281,7 @@ function ToolOverrides() {
       </table>
       {photo_models.length === 0 && (
         <p className="px-4 py-3 text-xs text-slate-500 border-t border-white/5">
-          Activa el toggle "Foto" en algún modelo de un proveedor para poder asignarlo a una herramienta.
+          Añade un proveedor con un modelo de <b>edición de imagen</b> (imagen → imagen, p. ej. FLUX Kontext, FLUX.2 Klein o Qwen Image Edit) para poder asignarlo a una herramienta.
         </p>
       )}
       </div>
