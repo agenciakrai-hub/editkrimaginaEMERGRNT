@@ -164,8 +164,10 @@ ACTIONS = {
             "clean, subtle HDR; lift the shadows and recover highlights so the room is bright, airy and "
             "inviting; set an accurate neutral white balance so walls and ceiling read as clean, even "
             "white with no grey/blue/yellow cast; keep wood floors and warm materials naturally warm; "
-            "perform a realistic window pull on the EXISTING windows and glass doors so the outside "
-            "view (sky, garden, buildings, rooftops) is clearly visible and not blown out; correct lens "
+            "adjust exposure and highlights ONLY in the exterior detail already visible through existing "
+            "windows and glass doors. NEVER replace or invent an exterior view. Keep frosted, textured, "
+            "translucent, opaque or blown-out glass as it is: do not turn it transparent or create a "
+            "landscape, sky, garden or buildings where no recoverable detail is visible. Correct lens "
             "barrel distortion and vignetting (no dark corners) and level the verticals and horizon. "
             "Increase clarity, micro-contrast and sharpness slightly and gently reduce noise. Keep it "
             "photorealistic and true to the real room: do NOT add, remove, move or duplicate furniture "
@@ -207,6 +209,15 @@ def build_prompt(action_key: str, options: dict) -> str:
         style_key = (options or {}).get("style", "nordico")
         prompt = prompt.replace("{style}", STAGING_STYLES.get(style_key, "modern contemporary"))
     guard = STRICT_GUARD if action_key in STRICT_ACTIONS else GEO_GUARD
+    if action_key in {"auto_pro", "complete"}:
+        guard += (
+            " ABSOLUTE PRESERVATION: keep the exact window glass, opacity, texture, frames, "
+            "curtains and the original exterior scene. Only improve its existing lighting, exposure "
+            "and white balance; never replace the sky, weather, vegetation or buildings, and never "
+            "invent hidden detail. Preserve mirrors, their frames, material, color and reflections; "
+            "do not redesign or replace fixtures, tiles, furniture or architectural elements. "
+            "These preservation rules take priority over window recovery, cleanup and enhancement."
+        )
     return f"{prompt}\n\n{guard}"
 
 
