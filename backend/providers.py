@@ -318,6 +318,42 @@ def image_mime(data: bytes) -> str:
     raise RuntimeError("Formato de imagen no válido: usa JPEG, PNG o WebP.")
 
 
+class ProviderRequestError(RuntimeError):
+    """Sanitized provider failure; never expose response bodies or credentials."""
+    def __init__(self, code, status_code, message):
+        self.code = code
+        self.status_code = status_code
+        super().__init__(message)
+
+
+def _check_edit_response(response):
+    status = response.status_code
+    if status < 400:
+        return
+    # Only inspect a machine-readable code, never return raw upstream HTML/text.
+    code = ""
+    try:
+        payload = response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict):
+            code = str(error.get("code") or error.get("type") or "").lower()
+        elif isinstance(error, str):
+            code = error.lower()
+    except (ValueError, TypeError):
+        pass
+    if status == 429 or code in {"rate_limited", "rate_limit_exceeded", "quota_exceeded"}:
+        raise ProviderRequestError("rate_limited", 429,
+            "El proveedor ha agotado su límite de uso. Espera a que se restablezca antes de repetir.")
+    if status in {408, 504, 524} or code in {"timeout", "generation_timeout"}:
+        raise ProviderRequestError("provider_timeout", 504,
+            "El proveedor agotó el tiempo de edición. Comprueba el estado antes de repetir.")
+    if status in {401, 403}:
+        raise ProviderRequestError("provider_auth", 503,
+            "KRAI no pudo autenticar esta aplicación. Revisa la conexión del proveedor.")
+    raise ProviderRequestError("provider_unavailable", 503,
+        "El servicio de edición no respondió correctamente. Inténtalo más tarde.")
+
+
 def _krai_edit(base_url, api_key, model_id, image_bytes, prompt):
     import base64
     import uuid
@@ -330,10 +366,11 @@ def _krai_edit(base_url, api_key, model_id, image_bytes, prompt):
             json={"task": "image_edit", "engine_hint": model_id,
                   "input": {"prompt": prompt, "image_b64": base64.b64encode(image_bytes).decode("ascii"),
                             "image_mime_type": mime},
-                  "options": {"timeout_ms": 60000}, "client_request_id": str(uuid.uuid4())},
-            timeout=(10, 90))
+                  "options": {"timeout_ms": 90000}, "client_request_id": str(uuid.uuid4())},
+            timeout=(10, 105))
     except requests.Timeout as exc:
-        raise RuntimeError("Tiempo de edición agotado. Comprueba Gemini antes de repetir.") from exc
+        raise ProviderRequestError("provider_timeout", 504, "Tiempo de edición agotado. Comprueba el estado antes de repetir.") from exc
+    _check_edit_response(response)
     try:
         payload = response.json()
     except ValueError as exc:
@@ -342,7 +379,9 @@ def _krai_edit(base_url, api_key, model_id, image_bytes, prompt):
         detail = payload.get("detail") or payload.get("message") or payload.get("error") or f"HTTP {response.status_code}"
         if isinstance(detail, dict):
             detail = detail.get("message") or detail.get("detail") or f"HTTP {response.status_code}"
-        raise RuntimeError(str(detail).replace(api_key or "\0", "[clave oculta]")[:300])
+        if "rate_limited" in str(detail).lower() or "quota" in str(detail).lower():
+            raise ProviderRequestError("rate_limited", 429, "Gemini ha agotado su límite de uso. Espera a que se restablezca antes de repetir.")
+        raise ProviderRequestError("provider_unavailable", 503, "KRAI no pudo completar la edición. Comprueba el estado antes de repetir.")
     for item in payload.get("artifacts") or []:
         if item.get("type") == "image" and item.get("data_b64"):
             try:

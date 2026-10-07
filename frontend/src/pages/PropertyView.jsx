@@ -212,7 +212,13 @@ export default function PropertyView() {
           clearInterval(interval);
           await load();
           await refresh();
-          toast.success(`Lote completado · ${data.done} editadas${data.failed ? `, ${data.failed} fallidas` : ""}`);
+          if (data.error_message) {
+            toast.error(data.error_message, { duration: 12000 });
+          } else if (data.failed) {
+            toast.error(`Lote terminado · ${data.done} editadas, ${data.failed} sin completar`);
+          } else {
+            toast.success(`Lote completado · ${data.done} editadas`);
+          }
           setTimeout(() => setJob(null), 3000);
         }
       } catch {

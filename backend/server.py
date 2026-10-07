@@ -148,10 +148,12 @@ async def get_tool_override(action_key: str):
 class ProviderEditError(RuntimeError):
     """Safe, user-facing error for an explicitly selected external image engine."""
 
-    def __init__(self, provider: str, model: str, reason: str = ""):
+    def __init__(self, provider: str, model: str, reason: str = "", code: str = "provider_unavailable", status_code: int = 503):
         self.provider = provider
         self.model = model
         self.reason = reason
+        self.code = code
+        self.status_code = status_code
         super().__init__(f"provider_edit_failed:{provider}:{model}:{reason}")
 
 COOKIE_KW = dict(httponly=True, secure=True, samesite="none", path="/")
@@ -550,7 +552,9 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
             raise ProviderEditError(
                 provider=prov.get("name") or prov.get("type") or "proveedor",
                 model=model_id,
-                reason=str(e)[:300],
+                reason=str(e)[:300] if isinstance(e, ai_providers.ProviderRequestError) else "El servicio de edición no respondió correctamente.",
+                code=getattr(e, "code", "provider_unavailable"),
+                status_code=getattr(e, "status_code", 503),
             ) from e
     if not result_bytes and not override and action_key in local_edit.SUPPORTED:
         # Essential (free) tools run locally — no AI API, no credits, no key balance.
@@ -615,14 +619,7 @@ async def edit_photo(photo_id: str, data: EditInput, user: dict = Depends(curren
         if charge > 0:
             await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": charge}})
         await db.photos.update_one({"id": photo_id}, {"$set": {"status": "ready"}})
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                f"El motor seleccionado ({e.provider} · {e.model}) no pudo editar la imagen. "
-                "No se ha usado el motor Gemini ni se han consumido créditos de Emergent. "
-                "Revisa que el modelo seleccionado sea compatible con edición de imágenes."
-            ),
-        )
+        raise HTTPException(status_code=e.status_code, detail=e.reason)
     except Exception:
         logger.exception("edit failed")
         if charge > 0:
@@ -788,7 +785,7 @@ async def inpaint_photo(photo_id: str, request: Request, user: dict = Depends(cu
 
 # ---------- Batch jobs ----------
 async def _process_batch(job_id: str, user_id: str, photo_ids: List[str], action_key: str, options: dict, disclosure, unit_cost: int):
-    for pid in photo_ids:
+    for item_index, pid in enumerate(photo_ids):
         photo = await db.photos.find_one({"id": pid, "user_id": user_id, "is_deleted": {"$ne": True}}, {"_id": 0})
         if not photo:
             await db.jobs.update_one({"id": job_id}, {"$inc": {"failed": 1, "processed": 1}})
@@ -797,6 +794,18 @@ async def _process_batch(job_id: str, user_id: str, photo_ids: List[str], action
         try:
             await _apply_edit(photo, action_key, options, disclosure)
             await db.jobs.update_one({"id": job_id}, {"$inc": {"done": 1, "processed": 1}})
+        except ProviderEditError as e:
+            await db.photos.update_one({"id": pid}, {"$set": {"status": "ready"}})
+            remaining = len(photo_ids) - item_index - 1 if e.code == "rate_limited" else 0
+            refund_count = 1 + remaining
+            if unit_cost > 0:
+                await db.users.update_one({"user_id": user_id}, {"$inc": {"credits": unit_cost * refund_count}})
+            await db.jobs.update_one({"id": job_id}, {
+                "$inc": {"failed": refund_count, "processed": refund_count},
+                "$set": {"error_code": e.code, "error_message": e.reason, "skipped": remaining},
+            })
+            if remaining:
+                break
         except Exception:
             logger.exception("batch item failed %s", pid)
             if unit_cost > 0:
