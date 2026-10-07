@@ -110,7 +110,10 @@ async def get_tool_override(action_key: str):
     settings = await db.ai_settings.find_one({"id": "tool_overrides"})
     if not settings:
         return None
-    ov = (settings.get("overrides") or {}).get(action_key)
+    overrides = settings.get("overrides") or {}
+    ov = overrides.get(action_key)
+    if action_key == "complete" and not ov:
+        ov = overrides.get("auto_pro")
     if not ov or not ov.get("provider_id") or not ov.get("model_id"):
         return None
 

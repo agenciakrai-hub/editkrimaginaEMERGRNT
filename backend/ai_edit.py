@@ -174,6 +174,24 @@ ACTIONS = {
     },
 }
 
+
+# Reuse the Pro photographic treatment, allowing only the requested clutter cleanup.
+ACTIONS["complete"] = {
+    "label": "Mejora completa",
+    "description": "Acabado Pro, perspectiva, limpieza de objetos y mayor nitidez.",
+    "cost": ACTIONS["auto_pro"]["cost"], "category": "premium", "disclosure_default": True,
+    "prompt": ACTIONS["auto_pro"]["prompt"].replace(
+        "do NOT add, remove, move or duplicate furniture or objects",
+        "preserve all furniture, fixtures and intentional decor; remove only clearly distracting temporary clutter such as loose cables, rubbish, cleaning supplies or stray personal items"
+    ) + (
+        " Additionally, carefully correct converging verticals, keystone and lens distortion "
+        "so walls, doors and windows are straight, the horizon is level and proportions remain natural. "
+        "Increase fine-detail sharpness and clarity while reducing noise, without halos, oversharpening "
+        "or invented texture. Do not remove structural elements, fixtures, furniture or property defects. "
+        "Keep the viewpoint and architecture; use only the minimal crop needed for perspective correction."
+    ),
+}
+
 STAGING_STYLES = {
     "nordico": "Scandinavian / Nordic",
     "moderno": "modern contemporary",
