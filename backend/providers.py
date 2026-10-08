@@ -299,6 +299,8 @@ def run_image_edit(provider: dict, model_id: str, image_bytes: bytes, prompt: st
         return _krai_edit(_norm(provider.get("base_url")), api_key, model_id, image_bytes, prompt)
     if ptype == "fal":
         return _fal_edit(api_key, model_id, image_bytes, prompt)
+    if _is_nvidia_openai_base(provider.get("base_url")) and model_id == NVIDIA_FLUX2_KLEIN_MODEL:
+        return _nvidia_flux2_edit(api_key, image_bytes, prompt)
     return _openai_edit(_norm(provider.get("base_url")), api_key, model_id, image_bytes, prompt)
 
 
@@ -436,3 +438,84 @@ def _fal_edit(api_key: str, model_id: str, image_bytes: bytes, prompt: str) -> b
     img = requests.get(url, timeout=60)
     img.raise_for_status()
     return img.content
+
+
+NVIDIA_FLUX2_KLEIN_MODEL = "black-forest-labs/flux.2-klein-4b"
+
+NVIDIA_FLUX2_KLEIN_URL = (
+    "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
+)
+
+NVIDIA_MEDIA_CATALOG = [
+    {"id": "black-forest-labs/flux.2-klein-4b", "name": "FLUX.2 Klein 4B (Image Edit)", "kind": "image", "can_edit": True, "can_video": False},
+    {"id": "nvidia/qwen-image-edit-nvpcb-ovsl2sl", "name": "Qwen Image Edit NVIDIA PCB", "kind": "image", "can_edit": True, "can_video": False},
+    {"id": "nvidia/cosmos3-nano", "name": "Cosmos3 Nano (Video)", "kind": "video", "can_edit": False, "can_video": True},
+    {"id": "nvidia/cosmos-transfer2.5-2b", "name": "Cosmos Transfer 2.5 (Video)", "kind": "video", "can_edit": False, "can_video": True},
+    {"id": "wan-ai/wan2.2-animate-2-14b", "name": "Wan2.2 Animate 2 (Video)", "kind": "video", "can_edit": False, "can_video": True},
+]
+
+def _is_nvidia_openai_base(base_url: str) -> bool:
+    return _norm(base_url).lower() == "https://integrate.api.nvidia.com/v1"
+
+def _nvidia_flux2_edit(api_key: str, image_bytes: bytes, prompt: str) -> bytes:
+    """Edit a user image through NVIDIA's hosted FLUX.2 Klein 4B endpoint.
+
+    NVIDIA documents this endpoint separately from /v1/models and /v1/chat.
+    The hosted Preview API currently documents a restricted image input set;
+    if NVIDIA rejects a user-provided image, the error is surfaced to the app
+    rather than silently falling back to Gemini.
+    """
+    import base64
+
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    payload = {
+        "mode": "Image Editing",
+        "prompt": prompt,
+        "image": [f"data:image/jpeg;base64,{image_b64}"],
+        "n": 1,
+        "samples": 1,
+        "response_format": "b64_json",
+        "seed": 0,
+        "steps": 4,
+        "width": 1024,
+        "height": 1024,
+    }
+    r = requests.post(
+        NVIDIA_FLUX2_KLEIN_URL,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=(20, 240),
+    )
+    if r.status_code >= 400:
+        detail = r.text[:1000]
+        raise RuntimeError(f"nvidia_flux2_http_{r.status_code}:{detail}")
+
+    payload_out = r.json()
+
+    # OpenAI-compatible response shape.
+    data = payload_out.get("data") if isinstance(payload_out, dict) else None
+    if isinstance(data, list) and data:
+        item = data[0] if isinstance(data[0], dict) else {}
+        if item.get("b64_json"):
+            return base64.b64decode(item["b64_json"])
+        if item.get("url"):
+            img = requests.get(item["url"], timeout=60)
+            img.raise_for_status()
+            return img.content
+
+    # NIM Visual GenAI response shape.
+    artifacts = payload_out.get("artifacts") if isinstance(payload_out, dict) else None
+    if isinstance(artifacts, list) and artifacts:
+        item = artifacts[0] if isinstance(artifacts[0], dict) else {}
+        if item.get("base64"):
+            return base64.b64decode(item["base64"])
+
+    raise RuntimeError("nvidia_flux2_no_image")
+
+for media in NVIDIA_MEDIA_CATALOG:
+    if not any(m["id"] == media["id"] for m in _PROVIDER_CATALOG["nvidia.com"]):
+        _PROVIDER_CATALOG["nvidia.com"].append({"id": media["id"], "name": media["name"], "capabilities": _caps(image_edit=media["can_edit"], video=media["can_video"])})

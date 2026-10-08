@@ -44,6 +44,14 @@ logger = logging.getLogger("watchful")
 BYPASS_OVERRIDE = set(local_edit.SUPPORTED)
 
 app = FastAPI(title="Watchful API")
+
+
+@app.get("/health")
+async def health():
+    """Health endpoint used by Emergent/nginx readiness checks."""
+    return {"status": "ok"}
+
+
 api = APIRouter(prefix="/api")
 
 
