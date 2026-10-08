@@ -184,7 +184,7 @@ export default function Editor() {
 
   const hasEdits = photo.edits?.length > 0;
   const esenciales = actions.filter((a) => a.category === "esencial");
-  const premium = actions.filter((a) => a.category === "premium" && !["auto_pro", "complete"].includes(a.key));
+  const premium = actions.filter((a) => a.category === "premium" && !["auto_pro", "complete", "complete_exterior"].includes(a.key));
   const ToolButton = ({ a }) => {
     const Icon = ICONS[a.key] || Sparkles;
     return (
@@ -387,10 +387,33 @@ export default function Editor() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-display font-semibold text-white">Mejora completa</span>
+                      <span className="font-display font-semibold text-white">Mejora completa · Interior</span>
                       <span className="text-[10px] font-semibold text-cyan-300 flex items-center gap-0.5"><Zap className="w-2.5 h-2.5" />{actions.find((a) => a.key === "complete")?.cost}</span>
                     </div>
-                    <p className="text-xs text-slate-400 mt-0.5">Acabado Pro · perspectiva, limpieza y nitidez</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Blancos neutros · ventanas, limpieza y perspectiva</p>
+                  </div>
+                  <Sparkles className="w-4 h-4 text-fuchsia-300 shrink-0" />
+                </div>
+              </button>
+            )}
+
+            {actions.find((a) => a.key === "complete_exterior") && (
+              <button
+                onClick={() => openConfirm(actions.find((a) => a.key === "complete_exterior"))}
+                disabled={busy}
+                data-testid="apply-complete_exterior-btn"
+                className="group w-full rounded-xl p-[1.5px] bg-gradient-to-r from-amber-400 via-fuchsia-500 to-cyan-400 disabled:opacity-50 hover:brightness-110 transition-[filter]"
+              >
+                <div className="rounded-[10px] bg-[#0d0b13] group-hover:bg-[#12101a] transition-colors p-4 flex items-center gap-3 text-left">
+                  <div className="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-amber-400 via-fuchsia-500 to-cyan-400 flex items-center justify-center">
+                    <Stars className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-display font-semibold text-white">Mejora completa · Exterior</span>
+                      <span className="text-[10px] font-semibold text-cyan-300 flex items-center gap-0.5"><Zap className="w-2.5 h-2.5" />{actions.find((a) => a.key === "complete_exterior")?.cost}</span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">Día soleado · cielo, fachadas, limpieza y perspectiva</p>
                   </div>
                   <Sparkles className="w-4 h-4 text-fuchsia-300 shrink-0" />
                 </div>

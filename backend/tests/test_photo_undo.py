@@ -99,7 +99,7 @@ def test_endpoint_checks_owner_and_excludes_deleted_photos():
     db.photos.update_one.assert_not_awaited()
 
 
-@pytest.mark.parametrize("action", ["complete", "auto_pro"])
+@pytest.mark.parametrize("action", ["complete_exterior", "auto_pro"])
 def test_sunny_exterior_and_white_window_exceptions_are_explicit(action):
     prompt = ai_edit.build_prompt(action, {}).lower()
     assert "gradient" in prompt

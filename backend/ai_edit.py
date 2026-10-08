@@ -182,49 +182,22 @@ ACTIONS = {
 }
 
 
-# Complete enhancement has its own instructions: cleanup must not inherit Pro's
-# prohibition on removing decor or retouching superficial surface blemishes.
+# Independent tools: exterior sunshine must never color interior white paint.
 ACTIONS["complete"] = {
-    "label": "Mejora completa",
-    "description": "Luz y color Pro, ventanas, exteriores soleados, perspectiva y limpieza completa.",
-    "cost": ACTIONS["auto_pro"]["cost"], "category": "premium", "disclosure_default": True,
-    "prompt": (
-        "Retouch this exact real-estate photograph. Complete EVERY applicable task in this "
-        "checklist in one edit, then inspect the result before returning it. "
-        "1. LIGHT AND COLOR: bright, balanced professional flambient exposure; lift dark interiors "
-        "and recover highlights without clipping windows. Neutral clean whites, natural warm wood, "
-        "accurate material colors, gentle contrast and saturation. No grey veil, yellow/blue cast, "
-        "HDR halos, plastic surfaces or excessive sharpening. Preserve natural shadows and depth. "
-        "2. WINDOWS: recover any real exterior detail already visible through the glass, preserving "
-        "the real landscape, frames, curtains and reflections. For COMPLETELY WHITE window glass "
-        "with no recoverable detail, add a VERY SUBTLE luminous pale sky-blue gradient inside only "
-        "that white area, fading gently toward white; no saturated blue, flat blue fill, landscape "
-        "or invented objects. Preserve the non-transparent character and texture of frosted or opaque glass. "
-        "3. CLEANUP: remove wall pictures, framed artwork, personal photos, small decorative objects "
-        "and loose items from tables, shelves, cabinets and bedside tables, including ALL table centerpieces, vases, tabletop plants, ornaments, bottles and containers; leave tabletops clear; remove rubbish bins, "
-        "rubbish, cleaning supplies, loose lamp cables and floor power strips. Keep EVERY door, garage door, shutter, gate and window in its EXACT original open/closed state, with the same panels, handles and frames. Never remove a door or reveal an interior hidden behind it. Keep outdoor benches, chimneys, wells, barbecues and permanent garden structures unchanged. Keep the lamps, "
-        "furniture, built-in fittings and their actual shape, position and materials. Reconstruct "
-        "only the exposed background surface with matching texture, lighting and shadows. "
-        "4. SURFACES: remove visible stains, scuffs, peeling or chipped paint, fine surface cracks and cosmetic blemishes "
-        "on walls and ceilings, including ceiling discoloration and patchy paint. Restore a clean, consistent painted finish with its natural texture and shading. Do not change the shape of the building "
-        "or redesign tiles, doors, sockets or fittings. "
-        "5. PERSPECTIVE: level camera roll and correct converging architectural verticals using "
-        "one coherent, conservative photographic perspective correction, with only a minimal crop. "
-        "Preserve the original viewpoint, depth, field of view and natural furniture proportions. "
-        "Receding horizontal lines must still converge naturally: do not force all edges parallel. "
-        "Never bend walls, stretch room corners, widen rooms, squash furniture, duplicate edges, "
-        "apply local rubber-sheet warping or invent image borders. If a stronger correction would "
-        "deform the scene, keep the safe partial correction. "
-        "6. SUNNY EXTERIORS: if this is an exterior photograph, replace an existing grey/rainy sky "
-        "with a natural clear blue sky for a sunny day. Harmonize exposure, white balance and light "
-        "on the building, vegetation and ground so the whole scene belongs to the same sunny day. "
-        "Subtle coherent sun glow or rays and believable soft sunlight/shadows are allowed; no "
-        "excessive lens flare, dramatic sunset or artificial saturation. Preserve the real landscape, "
-        "architecture, objects and door states. Never create sky in walls or interior ceilings. "
-        "FINAL CHECK: verify cleanup across the whole image, straight architectural lines, natural "
-        "proportions, faithful windows and clean light/color. Return only one edited photograph "
-        "with the same orientation and aspect ratio as the input, without text or watermark."
-    ),
+    "label": "Mejora completa · Interior",
+    "description": "Interiores: blancos neutros, luz equilibrada, ventanas, limpieza y perspectiva.",
+    "cost": 1,
+    "category": "premium",
+    "disclosure_default": True,
+    "prompt": "Edit this INTERIOR real-estate photograph with a clean neutral daylight flambient finish. This is an interior-only tool: do not apply a sunny exterior grade, warm sunlight, golden-hour lighting, sun rays, warm ambience, sepia or yellow/orange tint to the room.\nPRIORITY 1 — CLEAN WHITE PAINT: Walls and ceilings that are white in the original must read as PURE NEUTRAL WHITE after editing, never cream, beige, ivory or yellow. Neutralize tungsten/yellow light reflected from wood and lamps on white paint, curtains and white bedding. Preserve subtle neutral grey shading and texture, avoiding flat clipped white. Keep genuinely colored paint, wood and fabrics their authentic colors. Brighten the room with soft neutral daylight; reduce artificial lamp glow if it causes yellow casts. Remove stains, dark marks, patchy paint, scuffs and cosmetic fine cracks across ALL walls and ceilings.\nPRIORITY 2 — MANDATORY DECLUTTER: Remove EVERY wall picture, framed artwork, personal photograph and small decorative object; remove ALL vases, flower arrangements, table centerpieces, tabletop plants, ornaments, bottles, containers and loose items from tables, bedside tables, shelves and furniture tops. Leave these surfaces empty. Remove rubbish bins, cleaning supplies, loose lamp cables, floor cables and power strips. Do not leave flowers or vases as decoration. Reconstruct only the existing surface behind removed items. Keep furniture, beds, sofas, chairs, lamps, built-in fittings, mirrors and their real reflections. Do not add replacement decor.\nPRIORITY 3 — WINDOWS: Recover highlights and balance exposure of the EXISTING windows and exterior view, retaining all real visible details. Do not leave blown white glass where recoverable detail exists. In completely white glass with no detail, add ONLY a very subtle pale sky-blue-to-white gradient restricted to that glass, luminous and almost white; never invent a landscape, buildings or trees. Preserve curtains, frames, shutters and glazing texture. Keep frosted, textured or opaque glass non-transparent. Never turn a mirror into a window.\nPRIORITY 4 — PERSPECTIVE: Level camera roll and conservatively correct converging verticals with one coherent photographic perspective correction and minimal crop. Keep the real viewpoint, room dimensions, depth, furniture proportions and orientation/aspect ratio. No stretched corners, bent walls, rubber-sheet warping, duplicated edges or invented borders. Keep every door/window in its original open/closed state.\nFINAL AUDIT: inspect every white wall and ceiling for yellow casts, all tables and furniture tops for remaining objects, every window for blown highlights, and all vertical lines. Complete all four priorities before returning a single photorealistic image without text or watermark. Natural material detail, gentle contrast, no HDR halos or excessive sharpening. Record the real property faithfully. No interior sky replacement or added sunlight."
+}
+ACTIONS["complete_exterior"] = {
+    "label": "Mejora completa · Exterior",
+    "description": "Exteriores: cielo despejado, día soleado, fachadas, limpieza y perspectiva.",
+    "cost": 1,
+    "category": "premium",
+    "disclosure_default": True,
+    "prompt": "Edit this EXTERIOR real-estate photograph into a bright natural CLEAR SUNNY DAY. This is the exterior-only tool; do not use interior flambient relighting.\n1. SKY AND DAYLIGHT: Replace only an existing grey/rainy/overcast sky with a natural clear blue sky, subtle atmospheric gradient and optional small soft white clouds. Harmonize building, vegetation and ground with neutral daylight and coherent realistic soft sunlight/shadows. Subtle sun glow is allowed, no dramatic rays, lens flare, sunset, orange/yellow grade or oversaturation. Do not create sky where there is a building, wall, roof or tree.\n2. COLOR: White facades and trim stay CLEAN NEUTRAL WHITE, never yellow, cream or beige. Preserve authentic colored materials, stone, tile and wood. Balance exposure and recover highlights and shadows without HDR halos.\n3. CLEANUP: Remove loose rubbish, bins, cables, power strips, cleaning supplies and small distracting loose objects. Repair superficial stains and cosmetic paint defects without redesigning the property. Preserve permanent garden structures, benches, wells, barbecues, chimneys, trees, planting, architecture and boundary walls. Keep ALL doors, garage doors, shutters, gates and windows in their exact original open/closed state and shape. Never reveal a hidden interior or change panels/handles.\n4. WINDOWS: Preserve real glazing/reflections and recover visible detail. For completely white glass only, allow a VERY SUBTLE pale sky-blue-to-white gradient; never invent a landscape or make frosted/opaque glass transparent.\n5. PERSPECTIVE: Level camera roll and conservatively correct architectural verticals with one coherent photographic correction and minimal crop. Preserve viewpoint, proportions, depth, orientation and aspect ratio. No local stretching, bent walls, warped roofs, duplicated structures or invented borders.\nFINAL AUDIT: verify sunny coherent lighting, neutral white facades, clean surfaces, faithful door states and straight architectural lines. Return one photorealistic photograph without text or watermark."
 }
 
 STAGING_STYLES = {
@@ -241,30 +214,18 @@ def build_prompt(action_key: str, options: dict) -> str:
     if action_key == "staging":
         style_key = (options or {}).get("style", "nordico")
         prompt = prompt.replace("{style}", STAGING_STYLES.get(style_key, "modern contemporary"))
+    if action_key in {"complete", "complete_exterior"}:
+        # Each complete tool owns its scene rules, with no contradictory global grade.
+        return prompt
     guard = STRICT_GUARD if action_key in STRICT_ACTIONS else GEO_GUARD
-    if action_key == "complete":
-        guard = (
-            "Preserve the real architecture, room dimensions, furniture and fixtures. "
-            "Only the listed removable items and superficial blemishes may change. "
-            "A conservative global perspective adjustment and minimal crop are allowed; "
-            "no stretching, local warping, invented structure, scenery or borders. "
-            "Keep the source orientation and aspect ratio. Photorealistic output."
-        )
-    if action_key in {"auto_pro", "complete"}:
+    if action_key == "auto_pro":
         guard += (
-            " WINDOW AND SCENE RULES: preserve window frames, curtains, glazing texture and all "
-            "recoverable real exterior details. The ONLY permitted change to a completely white "
-            "window with no recoverable detail is a very subtle pale sky-blue-to-white gradient "
-            "within the glass; never invent a landscape. In exterior photographs, the requested "
-            "clear sunny sky and matching daylight may replace rainy weather; preserve the actual "
-            "buildings, vegetation and landscape. Preserve mirrors, their frames, material and "
-            "reflections; do not redesign fixtures, tiles, furniture or architectural elements. "
-            "The sky and white-window exceptions override any general scene-preservation wording."
+            " Preserve frames, curtains, glazing texture, real exterior details and mirrors. "
+            "For completely white glass only, allow a subtle pale sky-blue-to-white gradient; "
+            "never invent a landscape. Exterior sunny sky and matching daylight are allowed "
+            "only outside, never as a warm color cast on interior white paint."
         )
     return f"{prompt}\n\n{guard}"
-
-
-
 
 
 def _validate_complete_result(source: bytes, result: bytes) -> None:

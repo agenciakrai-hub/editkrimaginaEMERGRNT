@@ -120,7 +120,9 @@ async def get_tool_override(action_key: str):
         return None
     overrides = settings.get("overrides") or {}
     ov = overrides.get(action_key)
-    if action_key == "complete" and not ov:
+    if action_key == "complete_exterior" and not ov:
+        ov = overrides.get("complete")
+    if action_key in {"complete", "complete_exterior"} and not ov:
         ov = overrides.get("auto_pro")
     if not ov or not ov.get("provider_id") or not ov.get("model_id"):
         return None
@@ -618,7 +620,7 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
         raise ProviderEditError(provider="KRAI", model=used_model,
             reason="El proveedor no devolvió una imagen. No se usará un motor alternativo.",
             code="no_image")
-    if action_key == "complete":
+    if action_key in {"complete", "complete_exterior"}:
         try:
             ai_edit._validate_complete_result(data, result_bytes)
         except Exception as exc:
