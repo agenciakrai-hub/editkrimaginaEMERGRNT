@@ -217,6 +217,15 @@ STAGING_STYLES = {
 PERSPECTIVE_ONLY_PROMPT = "Perform ONLY a photographic perspective correction on this already edited real-estate photograph. Do not re-edit its lighting, white balance, colors, windows, sky, textures or objects. Correct camera roll and vertical keystone using a single coherent global projective transformation, equivalent to Lightroom Upright Vertical / a shift lens. Door jambs, window frame sides, cabinet uprights and wall corners must be parallel to the image's vertical axis from top to bottom, not leaning inward or outward. In particular align both edges of the tall wooden cabinet, both sides of the back window and both door jambs wherever present. Preserve natural convergence of receding horizontal lines; do not force all horizontals flat. Maintain realistic room depth, furniture proportions and viewpoint; no local stretching or bending. Crop only the minimum needed to remove empty borders, preserve the input orientation and aspect ratio, and do not invent borders. Every object, furnishing, wall picture, lamp, open/closed door and exterior detail must remain exactly as supplied. If already plumb, leave geometry unchanged. Return only the corrected photograph."
 
 
+# Shared photographic constraints; keep the selected KRAI engine and editing pipeline unchanged.
+WHITE_PAINT_FINISH = "FINAL EXPOSURE AND WHITE PAINT: The finished property photo must be visibly bright, luminous and airy, not dim or grey. Raise exposure of existing white-painted walls and ceilings into clean luminous neutral white mid/high tones. Neutralize grey, blue and yellow casts without bleaching colored materials. Retain plaster texture, gentle modelling and natural soft shadows; avoid clipped blank white or grey flat walls. Do not darken the room to recover windows."
+SKY_BOUNDARY_GUARD = "HARD ARCHITECTURE / SKY BOUNDARY: A bright white or light grey area is NOT evidence of sky. White plaster walls, ceilings, courtyard boundary walls, parapets, roof terraces, overhangs, niches and arches must remain solid surfaces with their original outline and texture. Never cut down a wall or parapet, open a roof, enlarge an opening or paint sky over architecture. Modify ONLY sky already unambiguously visible in the source, retaining the exact existing skyline silhouette. If sky is absent or uncertain, preserve that area and perform exposure/color adjustment only. The pale-celeste window fallback applies ONLY to confirmed existing transparent glass inside intact visible window frames, never to a wall or any other bright region. A perspective-only pass must preserve these boundaries and all colors exactly."
+for _action in ("auto", "light", "auto_pro", "complete", "complete_exterior"):
+    ACTIONS[_action]["prompt"] += "\n" + WHITE_PAINT_FINISH
+for _action in ("auto_pro", "complete", "complete_exterior", "sky", "window_pull"):
+    ACTIONS[_action]["prompt"] += "\n" + SKY_BOUNDARY_GUARD
+
+
 def build_prompt(action_key: str, options: dict) -> str:
     action = ACTIONS[action_key]
     if action_key == "perspective_pro":

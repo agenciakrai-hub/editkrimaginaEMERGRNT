@@ -931,6 +931,14 @@ async def batch_edit(property_id: str, data: BatchInput, user: dict = Depends(cu
     return {"job_id": job["id"], "total": len(photos), "cost": total_cost}
 
 
+@api.get("/properties/{property_id}/latest-batch")
+async def latest_batch(property_id: str, user: dict = Depends(current_user)):
+    prop = await db.properties.find_one({"id": property_id, "user_id": user["user_id"]})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+    return await db.jobs.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0}, sort=[("created_at", -1)])
+
+
 @api.get("/jobs/{job_id}")
 async def get_job(job_id: str, user: dict = Depends(current_user)):
     job = await db.jobs.find_one({"id": job_id, "user_id": user["user_id"]}, {"_id": 0})

@@ -63,6 +63,7 @@ export default function PropertyView() {
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchAction, setBatchAction] = useState("");
   const [job, setJob] = useState(null);
+  const [lastBatch, setLastBatch] = useState(null);
   const batchWatch = useRef(null);
   const batchKey = `krimagina:batch:${id}`;
 
@@ -221,6 +222,7 @@ export default function PropertyView() {
       onJob: setJob,
       onPhotos: setPhotos,
       onComplete: (data) => {
+        setLastBatch(data);
         sessionStorage.removeItem(batchKey);
         refresh().catch(() => {});
         if (data.error_message) toast.error(data.error_message, { duration: 12000 });
@@ -236,10 +238,17 @@ export default function PropertyView() {
   }, [id, batchKey, refresh]);
 
   useEffect(() => {
+    let cancelled = false;
+    setLastBatch(null);
     const jobId = sessionStorage.getItem(batchKey);
     if (jobId) pollJob(jobId);
-    return () => { batchWatch.current?.(); batchWatch.current = null; };
-  }, [batchKey, pollJob]);
+    else api.get(`/properties/${id}/latest-batch`, { params: { _refresh: Date.now() } }).then(({ data }) => {
+      if (cancelled || !data) return;
+      setLastBatch(data);
+      if (data.status === "processing") { setJob(data); pollJob(data.id); }
+    }).catch(() => {});
+    return () => { cancelled = true; batchWatch.current?.(); batchWatch.current = null; };
+  }, [id, batchKey, pollJob]);
 
   const statusBadge = (p) => {
     if (p.status === "processing")
@@ -316,6 +325,15 @@ export default function PropertyView() {
             <Button variant="ghost" size="sm" disabled={!!job} onClick={() => setSelectedIds(photos.map((p) => p.id))} data-testid="select-all-photos">Seleccionar todas</Button>
             <Button variant="ghost" size="sm" disabled={!!job || !selectedPhotos.length} onClick={() => setSelectedIds([])} data-testid="clear-photo-selection">Quitar selección</Button>
             <span className="text-xs text-slate-400">Marca las fotos de interior o exterior para editar solo ese grupo.</span>
+          </div>
+        )}
+
+        {lastBatch && !job && (
+          <div className="mb-6 rounded-xl border border-white/15 bg-white/5 p-4 text-sm" data-testid="last-batch-result">
+            <p className="font-semibold text-white">Último lote · {lastBatch.label}</p>
+            <p className="text-slate-300">{lastBatch.done || 0} editadas · {lastBatch.failed || 0} sin completar · {lastBatch.total} seleccionadas</p>
+            {lastBatch.error_message && <p className="mt-2 text-amber-200">{lastBatch.error_message}</p>}
+            {!!lastBatch.skipped && <p className="mt-1 text-slate-400">{lastBatch.skipped} fotos quedaron sin procesar después de detenerse el proveedor.</p>}
           </div>
         )}
 
