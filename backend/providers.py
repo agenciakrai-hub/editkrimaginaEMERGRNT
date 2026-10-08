@@ -368,8 +368,8 @@ def _krai_edit(base_url, api_key, model_id, image_bytes, prompt):
             json={"task": "image_edit", "engine_hint": model_id,
                   "input": {"prompt": prompt, "image_b64": base64.b64encode(image_bytes).decode("ascii"),
                             "image_mime_type": mime},
-                  "options": {"timeout_ms": 90000}, "client_request_id": str(uuid.uuid4())},
-            timeout=(10, 105))
+                  "options": {"timeout_ms": 240000}, "client_request_id": str(uuid.uuid4())},
+            timeout=(10, 255))
     except requests.Timeout as exc:
         raise ProviderRequestError("provider_timeout", 504, "Tiempo de edición agotado. Comprueba el estado antes de repetir.") from exc
     _check_edit_response(response)
