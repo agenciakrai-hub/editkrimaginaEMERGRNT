@@ -10,6 +10,8 @@ import ai_edit
 def test_interior_has_no_sunny_exterior_grade():
     p = ai_edit.build_prompt("complete", {}).lower()
     assert "pure neutral white" in p
+    assert "printed floral fabric is not clutter" in p
+    assert "not a blank white rectangle" in p
     assert "never cream, beige, ivory or yellow" in p
     assert "leave these surfaces empty" in p
     assert "recover highlights" in p
