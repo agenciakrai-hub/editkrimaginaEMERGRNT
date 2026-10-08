@@ -331,7 +331,7 @@ export default function PropertyView() {
         {lastBatch && !job && (
           <div className="mb-6 rounded-xl border border-white/15 bg-white/5 p-4 text-sm" data-testid="last-batch-result">
             <p className="font-semibold text-white">Último lote · {lastBatch.label}</p>
-            <p className="text-slate-300">{lastBatch.done || 0} editadas · {lastBatch.failed || 0} sin completar · {lastBatch.total} seleccionadas</p>
+            <p className="text-slate-300">{lastBatch.done || 0} editadas · {lastBatch.failed || 0} fallidas · {Math.max(0, lastBatch.total - (lastBatch.done || 0) - (lastBatch.failed || 0))} pendientes · {lastBatch.total} seleccionadas</p>
             {lastBatch.error_message && <p className="mt-2 text-amber-200">{lastBatch.error_message}</p>}
             {!!lastBatch.skipped && <p className="mt-1 text-slate-400">{lastBatch.skipped} fotos quedaron sin procesar después de detenerse el proveedor.</p>}
           </div>

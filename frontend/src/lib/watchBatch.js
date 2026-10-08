@@ -7,13 +7,13 @@ export function watchBatch({ readJob, readPhotos, onJob, onPhotos, onComplete, o
       const job = await readJob();
       if (stopped) return;
       onJob(job);
-      if (job.processed !== progress || job.status === "done") {
+      if (job.processed !== progress || ["done", "failed", "interrupted"].includes(job.status)) {
         const photos = await readPhotos();
         if (stopped) return;
         onPhotos(photos);
         progress = job.processed;
       }
-      if (job.status === "done") {
+      if (["done", "failed", "interrupted"].includes(job.status)) {
         stopped = true;
         onComplete(job);
         return;

@@ -870,11 +870,13 @@ async def _process_batch(job_id: str, user_id: str, photo_ids: List[str], action
             await db.jobs.update_one({"id": job_id}, {
                 "$inc": {"failed": refund_count, "processed": refund_count},
                 "$set": {"error_code": e.code, "error_message": e.reason, "skipped": remaining},
+                "$addToSet": {"failed_photo_ids": pid},
             })
             if remaining:
                 break
         except Exception:
             logger.exception("batch item failed %s", pid)
+            await db.jobs.update_one({"id": job_id}, {"$set": {"error_code": "batch_item_failed", "error_message": "No se pudo editar la foto " + str(photo.get("filename") or photo.get("name") or pid) + ". Se conservó su imagen anterior."}, "$addToSet": {"failed_photo_ids": pid}})
             if unit_cost > 0:
                 await db.users.update_one({"user_id": user_id}, {"$inc": {"credits": unit_cost}})
             await db.photos.update_one({"id": pid}, {"$set": {"status": "ready"}})
@@ -1299,7 +1301,7 @@ async def startup():
     if orphaned_videos:
         logger.info("Recovered %s orphaned videos", len(orphaned_videos))
     await db.photos.update_many({"status": "processing"}, {"$set": {"status": "ready"}})
-    await db.jobs.update_many({"status": "processing"}, {"$set": {"status": "done"}})
+    await db.jobs.update_many({"status": "processing"}, {"$set": {"status": "interrupted", "error_message": "El lote se interrumpió antes de completar todas las fotos. Las ediciones guardadas se conservan; revisa las pendientes antes de reintentarlas."}})
 
     asyncio.create_task(_video_sweeper())
 

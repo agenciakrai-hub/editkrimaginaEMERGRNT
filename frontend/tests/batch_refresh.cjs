@@ -20,5 +20,8 @@ const fs = require('node:fs');
  let resolve, published=false, scheduled=false;
  const cancel = watchBatch({readJob:()=>new Promise(r=>resolve=r),readPhotos:async()=>[],onJob:()=>published=true,onPhotos:()=>published=true,onComplete:()=>published=true,onError:()=>published=true,schedule:()=>scheduled=true,cancel:()=>{}});
  cancel(); resolve({processed:0,status:'done'}); await flush(); assert.equal(published,false); assert.equal(scheduled,false);
+ let interrupted=false;
+ watchBatch({readJob:async()=>({processed:19,status:'interrupted'}),readPhotos:async()=>[],onJob:()=>{},onPhotos:()=>{},onComplete:()=>interrupted=true,onError:e=>{throw e;},schedule:()=>{throw new Error('Interrupted jobs must stop polling');},cancel:()=>{}});
+ await flush(); assert.equal(interrupted,true);
  console.log('Batch refresh regression checks passed: progress, transient errors, final refresh retry, cancellation.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
