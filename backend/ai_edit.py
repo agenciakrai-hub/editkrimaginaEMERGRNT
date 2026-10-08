@@ -2,6 +2,8 @@ import os
 import asyncio
 import base64
 import logging
+import io
+from PIL import Image, ImageOps
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 
 logger = logging.getLogger(__name__)
@@ -177,20 +179,40 @@ ACTIONS = {
 }
 
 
-# Reuse the Pro photographic treatment, allowing only the requested clutter cleanup.
+# Complete enhancement has its own instructions: cleanup must not inherit Pro's
+# prohibition on removing decor or retouching superficial surface blemishes.
 ACTIONS["complete"] = {
     "label": "Mejora completa",
-    "description": "Acabado Pro, perspectiva, limpieza de objetos y mayor nitidez.",
+    "description": "Luz y color Pro, ventanas, perspectiva y limpieza completa.",
     "cost": ACTIONS["auto_pro"]["cost"], "category": "premium", "disclosure_default": True,
-    "prompt": ACTIONS["auto_pro"]["prompt"].replace(
-        "do NOT add, remove, move or duplicate furniture or objects",
-        "preserve all furniture, fixtures and intentional decor; remove only clearly distracting temporary clutter such as loose cables, rubbish, cleaning supplies or stray personal items"
-    ) + (
-        " Additionally, carefully correct converging verticals, keystone and lens distortion "
-        "so walls, doors and windows are straight, the horizon is level and proportions remain natural. "
-        "Increase fine-detail sharpness and clarity while reducing noise, without halos, oversharpening "
-        "or invented texture. Do not remove structural elements, fixtures, furniture or property defects. "
-        "Keep the viewpoint and architecture; use only the minimal crop needed for perspective correction."
+    "prompt": (
+        "Retouch this exact real-estate photograph. Complete EVERY applicable task in this "
+        "checklist in one edit, then inspect the result before returning it. "
+        "1. LIGHT AND COLOR: bright, balanced professional flambient exposure; lift dark interiors "
+        "and recover highlights without clipping windows. Neutral clean whites, natural warm wood, "
+        "accurate material colors, gentle contrast and saturation. No grey veil, yellow/blue cast, "
+        "HDR halos, plastic surfaces or excessive sharpening. Preserve natural shadows and depth. "
+        "2. WINDOWS: recover exposure only in exterior detail actually present in existing windows. "
+        "Keep the exact exterior, glass opacity/texture, frames, curtains and reflections. Never "
+        "invent scenery or turn opaque, frosted or blown-out glass into a new view. "
+        "3. CLEANUP: remove wall pictures, framed artwork, personal photos, small decorative objects "
+        "and loose items from tables, shelves, cabinets and bedside tables, including ALL table centerpieces, vases, tabletop plants, ornaments, bottles and containers; leave tabletops clear; remove rubbish bins, "
+        "rubbish, cleaning supplies, loose lamp cables and floor power strips. Keep EVERY door, garage door, shutter, gate and window in its EXACT original open/closed state, with the same panels, handles and frames. Never remove a door or reveal an interior hidden behind it. Keep outdoor benches, chimneys, wells, barbecues and permanent garden structures unchanged. Keep the lamps, "
+        "furniture, built-in fittings and their actual shape, position and materials. Reconstruct "
+        "only the exposed background surface with matching texture, lighting and shadows. "
+        "4. SURFACES: retouch superficial stains, scuffs, chipped paint and small cosmetic blemishes "
+        "on walls and ceilings. Do not erase structural cracks, damp, mould or structural damage, "
+        "or redesign surfaces, tiles, doors, sockets or fittings. "
+        "5. PERSPECTIVE: level camera roll and correct converging architectural verticals using "
+        "one coherent, conservative photographic perspective correction, with only a minimal crop. "
+        "Preserve the original viewpoint, depth, field of view and natural furniture proportions. "
+        "Receding horizontal lines must still converge naturally: do not force all edges parallel. "
+        "Never bend walls, stretch room corners, widen rooms, squash furniture, duplicate edges, "
+        "apply local rubber-sheet warping or invent image borders. If a stronger correction would "
+        "deform the scene, keep the safe partial correction. "
+        "FINAL CHECK: verify cleanup across the whole image, straight architectural lines, natural "
+        "proportions, faithful windows and clean light/color. Return only one edited photograph "
+        "with the same orientation and aspect ratio as the input, without text or watermark."
     ),
 }
 
@@ -209,6 +231,14 @@ def build_prompt(action_key: str, options: dict) -> str:
         style_key = (options or {}).get("style", "nordico")
         prompt = prompt.replace("{style}", STAGING_STYLES.get(style_key, "modern contemporary"))
     guard = STRICT_GUARD if action_key in STRICT_ACTIONS else GEO_GUARD
+    if action_key == "complete":
+        guard = (
+            "Preserve the real architecture, room dimensions, furniture and fixtures. "
+            "Only the listed removable items and superficial blemishes may change. "
+            "A conservative global perspective adjustment and minimal crop are allowed; "
+            "no stretching, local warping, invented structure, scenery or borders. "
+            "Keep the source orientation and aspect ratio. Photorealistic output."
+        )
     if action_key in {"auto_pro", "complete"}:
         guard += (
             " ABSOLUTE PRESERVATION: keep the exact window glass, opacity, texture, frames, "
@@ -243,6 +273,20 @@ async def _call_model(model: str, prompt: str, b64: str, session_id: str) -> byt
     return None
 
 
+
+def _validate_complete_result(source: bytes, result: bytes) -> None:
+    """Reject corrupt outputs and format changes instead of stretching them to fit.
+
+    This guards dimensions only; semantic/geometry fidelity still needs visual QA.
+    """
+    with Image.open(io.BytesIO(source)) as src, Image.open(io.BytesIO(result)) as out:
+        sw, sh = ImageOps.exif_transpose(src).size
+        ow, oh = ImageOps.exif_transpose(out).size
+        out.load()
+        if (sw > sh) != (ow > oh) or abs((ow / oh) / (sw / sh) - 1) > 0.03:
+            raise ValueError("complete_result_aspect_ratio_changed")
+
+
 async def run_edit(image_bytes: bytes, action_key: str, options: dict, session_id: str) -> bytes:
     prompt = build_prompt(action_key, options)
     b64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -254,6 +298,8 @@ async def run_edit(image_bytes: bytes, action_key: str, options: dict, session_i
         try:
             result = await _call_model(model, prompt, b64, f"{session_id}_{i}")
             if result:
+                if action_key == "complete":
+                    _validate_complete_result(image_bytes, result)
                 return result
         except Exception as e:
             last_error = e
