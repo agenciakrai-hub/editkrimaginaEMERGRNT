@@ -426,6 +426,25 @@ async def delete_property(property_id: str, user: dict = Depends(current_user)):
 
 
 # ---------- Photos ----------
+def _can_undo_photo(photo: dict) -> bool:
+    edits = photo.get("edits") or []
+    return bool(edits and (edits[-1].get("before_path") or len(edits) == 1))
+
+
+def _photo_undo_state(photo: dict) -> dict:
+    edits = photo.get("edits") or []
+    if not edits:
+        raise HTTPException(status_code=409, detail="No hay ediciones que deshacer")
+    last = edits[-1]
+    previous_path = last.get("before_path")
+    if not previous_path and len(edits) == 1:
+        previous_path = photo["original_path"]
+    if not previous_path:
+        raise HTTPException(status_code=409, detail="Esta edición antigua no conserva la versión anterior. Las nuevas ediciones sí permiten deshacer.")
+    return {"current_path": previous_path, "edits": edits[:-1], "status": "ready",
+            "disclosure": bool(last.get("before_disclosure", any(e.get("disclosure", True) for e in edits[:-1])))}
+
+
 def _photo_public(p: dict) -> dict:
     return {
         "id": p["id"],
@@ -436,6 +455,7 @@ def _photo_public(p: dict) -> dict:
         "status": p.get("status", "ready"),
         "disclosure": p.get("disclosure", False),
         "edits": p.get("edits", []),
+        "can_undo": _can_undo_photo(p),
         "created_at": p.get("created_at"),
     }
 
@@ -510,6 +530,23 @@ async def delete_photo(photo_id: str, user: dict = Depends(current_user)):
         raise HTTPException(status_code=404, detail="Foto no encontrada")
     await db.photos.update_one({"id": photo_id}, {"$set": {"is_deleted": True}})
     return {"ok": True}
+
+
+@api.post("/photos/{photo_id}/undo")
+async def undo_photo(photo_id: str, user: dict = Depends(current_user)):
+    query = {"id": photo_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}
+    photo = await db.photos.find_one(query, {"_id": 0})
+    if not photo:
+        raise HTTPException(status_code=404, detail="Foto no encontrada")
+    if photo.get("status") == "processing":
+        raise HTTPException(status_code=409, detail="Espera a que termine la edición")
+    state = _photo_undo_state(photo)
+    # Compare-and-set: an edit completed in another tab must never be overwritten.
+    query.update({"current_path": photo.get("current_path"), "edits": photo.get("edits", []), "status": {"$ne": "processing"}})
+    result = await db.photos.update_one(query, {"$set": state})
+    if not result.modified_count:
+        raise HTTPException(status_code=409, detail="La foto ha cambiado. Recarga antes de deshacer.")
+    return _photo_public({**photo, **state})
 
 
 @api.post("/photos/{photo_id}/revert")
@@ -597,7 +634,8 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     stored = await asyncio.to_thread(storage.put_object, out_path, result_bytes, output_mime)
     action = ai_edit.ACTIONS[action_key]
     disc = action["disclosure_default"] if disclosure is None else disclosure
-    edit_entry = {"action": action_key, "label": action["label"], "at": datetime.now(timezone.utc).isoformat()}
+    edit_entry = {"action": action_key, "label": action["label"], "at": datetime.now(timezone.utc).isoformat(),
+                  "before_path": src_path, "before_disclosure": bool(photo.get("disclosure", False)), "disclosure": bool(disc)}
     await db.photos.update_one(
         {"id": photo["id"]},
         {
@@ -793,7 +831,8 @@ async def inpaint_photo(photo_id: str, request: Request, user: dict = Depends(cu
         raise HTTPException(status_code=500, detail="No se pudo borrar el objeto")
     out_path = f"{storage.APP_NAME}/edits/{user['user_id']}/{uuid.uuid4()}.jpg"
     stored = await asyncio.to_thread(storage.put_object, out_path, result, "image/jpeg")
-    edit_entry = {"action": "spot_remove", "label": "Borrador (local)", "at": datetime.now(timezone.utc).isoformat()}
+    edit_entry = {"action": "spot_remove", "label": "Borrador (local)", "at": datetime.now(timezone.utc).isoformat(),
+                  "before_path": photo.get("current_path") or photo["original_path"], "before_disclosure": bool(photo.get("disclosure", False)), "disclosure": bool(photo.get("disclosure", False))}
     await db.photos.update_one({"id": photo_id}, {"$set": {"current_path": stored["path"], "status": "ready"}, "$push": {"edits": edit_entry}})
     await log_usage(user["user_id"], "photo", "spot_remove", 0, 0, "local", "opencv")
     updated = await db.photos.find_one({"id": photo_id}, {"_id": 0})

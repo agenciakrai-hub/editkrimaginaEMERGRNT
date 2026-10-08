@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { motion } from "framer-motion";
 import {
-  ArrowLeft, Zap, Loader2, Download, Undo2, ShieldCheck, GitCompareArrows, Image as ImageIcon,
+  ArrowLeft, ChevronLeft, ChevronRight, RotateCcw, Zap, Loader2, Download, Undo2, ShieldCheck, GitCompareArrows, Image as ImageIcon,
   Sun, Sparkles, SlidersHorizontal, Moon, Eraser, Trees, PanelTop, Sofa, Maximize, Wand2, Frame, Stars,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -65,22 +65,50 @@ export default function Editor() {
     a.remove();
   };
 
-  const load = useCallback(async () => {
-    try {
-      const [ph, ac] = await Promise.all([
-        api.get(`/photos/${photoId}`),
-        api.get(`/actions`),
-      ]);
-      setPhoto(ph.data);
-      setActions(ac.data);
-      setCompare(ph.data.edits?.length > 0);
-    } catch (err) {
-      toast.error(apiError(err));
-      navigate(`/app/property/${id}`);
-    }
+  const [photos, setPhotos] = useState([]);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const busy = processing || historyBusy;
+  const photoIndex = photos.findIndex((p) => p.id === photoId);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPhoto(null);
+    setConfirmAction(null);
+    setEraserOpen(false);
+    setCompare(false);
+    Promise.all([api.get(`/photos/${photoId}`), api.get("/actions"), api.get(`/properties/${id}/photos`)])
+      .then(([ph, ac, list]) => {
+        if (cancelled) return;
+        setPhoto(ph.data);
+        setActions(ac.data);
+        setPhotos(list.data);
+        setCompare(ph.data.edits?.length > 0);
+      }).catch((err) => {
+        if (cancelled) return;
+        toast.error(apiError(err));
+        navigate(`/app/property/${id}`);
+      });
+    return () => { cancelled = true; };
   }, [photoId, id, navigate]);
 
-  useEffect(() => { load(); }, [load]);
+  const goPhoto = useCallback((delta) => {
+    if (busy || !photo || confirmAction || eraserOpen) return;
+    const target = photos[photoIndex + delta];
+    if (photoIndex >= 0 && target) navigate(`/app/property/${id}/photo/${target.id}`);
+  }, [busy, photo, confirmAction, eraserOpen, photos, photoIndex, id, navigate]);
+
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+          event.target.closest?.('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="combobox"]')) return;
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        goPhoto(event.key === "ArrowLeft" ? -1 : 1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [goPhoto]);
 
   const openConfirm = (action) => {
     setDisclosure(action.disclosure_default);
@@ -122,6 +150,8 @@ export default function Editor() {
   };
 
   const revert = async () => {
+    if (busy) return;
+    setHistoryBusy(true);
     try {
       const { data } = await api.post(`/photos/${photoId}/revert`);
       setPhoto(data);
@@ -129,7 +159,19 @@ export default function Editor() {
       toast.success("Foto restaurada al original");
     } catch (err) {
       toast.error(apiError(err));
-    }
+    } finally { setHistoryBusy(false); }
+  };
+
+  const undo = async () => {
+    if (busy) return;
+    setHistoryBusy(true);
+    try {
+      const { data } = await api.post(`/photos/${photoId}/undo`);
+      setPhoto(data);
+      setCompare(data.edits?.length > 0);
+      toast.success("Última edición deshecha");
+    } catch (err) { toast.error(apiError(err)); }
+    finally { setHistoryBusy(false); }
   };
 
   const download = async () => {
@@ -148,7 +190,7 @@ export default function Editor() {
     return (
       <button
         onClick={() => openConfirm(a)}
-        disabled={processing}
+        disabled={busy}
         data-testid={`apply-${a.key}-btn`}
         className="w-full text-left rounded-xl border border-white/5 bg-[#15131C] hover:border-cyan-500/40 hover:bg-[#1E1A29] p-3 flex items-start gap-3 transition-colors disabled:opacity-50"
       >
@@ -174,13 +216,13 @@ export default function Editor() {
     <div className="h-screen flex flex-col bg-background overflow-hidden">
       {/* Top bar */}
       <div className="h-14 shrink-0 border-b border-white/5 backdrop-blur-xl bg-[#15131C]/80 flex items-center justify-between px-4 gap-3">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(`/app/property/${id}`)} data-testid="editor-back"
+        <div className="flex items-center gap-3 min-w-0">
+          <button disabled={busy} onClick={() => navigate(`/app/property/${id}`)} data-testid="editor-back"
             className="flex items-center gap-1.5 text-sm text-slate-300 hover:text-white">
             <ArrowLeft className="w-4 h-4" /> Volver
           </button>
           <div className="hidden sm:block"><Logo showText={false} size={26} /></div>
-          <span className="text-sm text-slate-400 truncate max-w-[180px]">{photo.original_filename}</span>
+          <span className="hidden sm:block text-sm text-slate-400 truncate max-w-[180px]">{photo.original_filename}</span>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-violet-500/40 bg-violet-500/10" data-testid="editor-credits">
@@ -188,12 +230,19 @@ export default function Editor() {
             <span className="text-sm font-semibold text-white tabular-nums">{user?.unlimited ? "∞" : user?.credits}</span>
           </div>
           {hasEdits && (
-            <Button onClick={revert} variant="outline" size="sm" data-testid="revert-btn"
+            <Button onClick={undo} disabled={busy || !photo.can_undo} variant="outline" size="sm" data-testid="undo-btn"
+              aria-label="Deshacer última edición" title={photo.can_undo ? "Deshacer solo la última edición" : "Esta edición antigua no conserva el paso anterior"}
               className="rounded-full border-white/15 bg-white/5 hover:bg-white/10 text-white">
-              <Undo2 className="w-4 h-4 sm:mr-1.5" /> <span className="hidden sm:inline">Restaurar</span>
+              {historyBusy ? <Loader2 className="w-4 h-4 animate-spin sm:mr-1.5" /> : <Undo2 className="w-4 h-4 sm:mr-1.5" />} <span className="hidden sm:inline">Deshacer</span>
             </Button>
           )}
-          <Button onClick={() => setEraserOpen(true)} variant="outline" size="sm" data-testid="open-eraser-btn"
+          {hasEdits && (
+            <Button disabled={busy} aria-label="Restaurar foto original" title="Eliminar todas las ediciones y volver al original" onClick={revert} variant="outline" size="sm" data-testid="revert-btn"
+              className="rounded-full border-white/15 bg-white/5 hover:bg-white/10 text-white">
+              <RotateCcw className="w-4 h-4 sm:mr-1.5" /> <span className="hidden sm:inline">Restaurar</span>
+            </Button>
+          )}
+          <Button disabled={busy} onClick={() => setEraserOpen(true)} variant="outline" size="sm" data-testid="open-eraser-btn"
             className="rounded-full border-white/15 bg-white/5 hover:bg-white/10 text-white">
             <Eraser className="w-4 h-4 sm:mr-1.5" /> <span className="hidden sm:inline">Borrador</span>
           </Button>
@@ -228,6 +277,19 @@ export default function Editor() {
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Canvas */}
         <div className="flex-1 relative bg-[#050505] flex items-center justify-center p-4 sm:p-8 min-h-0">
+          {photos.length > 1 && (
+            <>
+              <button onClick={() => goPhoto(-1)} disabled={busy || photoIndex <= 0} aria-label="Foto anterior" title="Foto anterior (←)" data-testid="previous-photo-btn"
+                className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-20 rounded-full p-2 bg-black/65 hover:bg-black/85 text-white border border-white/20 disabled:opacity-25 disabled:cursor-not-allowed">
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+              <button onClick={() => goPhoto(1)} disabled={busy || photoIndex < 0 || photoIndex >= photos.length - 1} aria-label="Foto siguiente" title="Foto siguiente (→)" data-testid="next-photo-btn"
+                className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-20 rounded-full p-2 bg-black/65 hover:bg-black/85 text-white border border-white/20 disabled:opacity-25 disabled:cursor-not-allowed">
+                <ChevronRight className="w-6 h-6" />
+              </button>
+              <span className="absolute top-4 left-4 z-20 text-xs px-3 py-1.5 rounded-full bg-black/65 text-white border border-white/10" data-testid="photo-position">{photoIndex + 1} / {photos.length}</span>
+            </>
+          )}
           {processing && (
             <div className="absolute inset-0 z-30 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center gap-4" data-testid="editor-processing">
               <div className="relative">
@@ -270,7 +332,7 @@ export default function Editor() {
           <div className="p-4 space-y-6">
             <button
               onClick={applyAuto}
-              disabled={processing}
+              disabled={busy}
               data-testid="apply-auto-btn"
               className="group w-full rounded-xl p-[1.5px] bg-gradient-to-r from-violet-600 to-cyan-500 disabled:opacity-50 hover:brightness-110 transition-[filter]"
             >
@@ -292,7 +354,7 @@ export default function Editor() {
             {actions.find((a) => a.key === "auto_pro") && (
               <button
                 onClick={() => openConfirm(actions.find((a) => a.key === "auto_pro"))}
-                disabled={processing}
+                disabled={busy}
                 data-testid="apply-auto-pro-btn"
                 className="group w-full rounded-xl p-[1.5px] bg-gradient-to-r from-amber-400 via-fuchsia-500 to-cyan-400 disabled:opacity-50 hover:brightness-110 transition-[filter]"
               >
@@ -315,7 +377,7 @@ export default function Editor() {
             {actions.find((a) => a.key === "complete") && (
               <button
                 onClick={() => openConfirm(actions.find((a) => a.key === "complete"))}
-                disabled={processing}
+                disabled={busy}
                 data-testid="apply-complete-btn"
                 className="group w-full rounded-xl p-[1.5px] bg-gradient-to-r from-amber-400 via-fuchsia-500 to-cyan-400 disabled:opacity-50 hover:brightness-110 transition-[filter]"
               >
@@ -414,7 +476,7 @@ export default function Editor() {
           <DialogFooter>
             <Button
               onClick={apply}
-              disabled={confirmAction && !user?.unlimited && confirmAction.cost > (user?.credits ?? 0)}
+              disabled={busy || (confirmAction && !user?.unlimited && confirmAction.cost > (user?.credits ?? 0))}
               data-testid="confirm-apply-btn"
               className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter] w-full">
               Aplicar {confirmAction?.cost === 0 ? "gratis" : `· ${confirmAction?.cost} créditos`}

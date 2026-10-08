@@ -166,9 +166,13 @@ ACTIONS = {
             "inviting; set an accurate neutral white balance so walls and ceiling read as clean, even "
             "white with no grey/blue/yellow cast; keep wood floors and warm materials naturally warm; "
             "adjust exposure and highlights ONLY in the exterior detail already visible through existing "
-            "windows and glass doors. NEVER replace or invent an exterior view. Keep frosted, textured, "
-            "translucent, opaque or blown-out glass as it is: do not turn it transparent or create a "
-            "landscape, sky, garden or buildings where no recoverable detail is visible. Correct lens "
+            "windows and glass doors, retaining every visible real landscape element. If a window area is "
+            "completely white with no recoverable detail, add ONLY a very subtle pale sky-blue gradient "
+            "within that white glass area; keep it luminous, nearly white, without invented scenery. "
+            "Keep frosted, textured, translucent or opaque glass non-transparent. For exterior photos, "
+            "replace the existing rainy or overcast sky with a natural clear blue sunny-day sky, and "
+            "harmonize the building, vegetation and ground with realistic daylight and coherent soft "
+            "sunlight, shadows and optional subtle sun effects. Preserve the actual property and vegetation. Correct lens "
             "barrel distortion and vignetting (no dark corners) and level the verticals and horizon. "
             "Increase clarity, micro-contrast and sharpness slightly and gently reduce noise. Keep it "
             "photorealistic and true to the real room: do NOT add, remove, move or duplicate furniture "
@@ -182,7 +186,7 @@ ACTIONS = {
 # prohibition on removing decor or retouching superficial surface blemishes.
 ACTIONS["complete"] = {
     "label": "Mejora completa",
-    "description": "Luz y color Pro, ventanas, perspectiva y limpieza completa.",
+    "description": "Luz y color Pro, ventanas, exteriores soleados, perspectiva y limpieza completa.",
     "cost": ACTIONS["auto_pro"]["cost"], "category": "premium", "disclosure_default": True,
     "prompt": (
         "Retouch this exact real-estate photograph. Complete EVERY applicable task in this "
@@ -191,9 +195,11 @@ ACTIONS["complete"] = {
         "and recover highlights without clipping windows. Neutral clean whites, natural warm wood, "
         "accurate material colors, gentle contrast and saturation. No grey veil, yellow/blue cast, "
         "HDR halos, plastic surfaces or excessive sharpening. Preserve natural shadows and depth. "
-        "2. WINDOWS: recover exposure only in exterior detail actually present in existing windows. "
-        "Keep the exact exterior, glass opacity/texture, frames, curtains and reflections. Never "
-        "invent scenery or turn opaque, frosted or blown-out glass into a new view. "
+        "2. WINDOWS: recover any real exterior detail already visible through the glass, preserving "
+        "the real landscape, frames, curtains and reflections. For COMPLETELY WHITE window glass "
+        "with no recoverable detail, add a VERY SUBTLE luminous pale sky-blue gradient inside only "
+        "that white area, fading gently toward white; no saturated blue, flat blue fill, landscape "
+        "or invented objects. Preserve the non-transparent character and texture of frosted or opaque glass. "
         "3. CLEANUP: remove wall pictures, framed artwork, personal photos, small decorative objects "
         "and loose items from tables, shelves, cabinets and bedside tables, including ALL table centerpieces, vases, tabletop plants, ornaments, bottles and containers; leave tabletops clear; remove rubbish bins, "
         "rubbish, cleaning supplies, loose lamp cables and floor power strips. Keep EVERY door, garage door, shutter, gate and window in its EXACT original open/closed state, with the same panels, handles and frames. Never remove a door or reveal an interior hidden behind it. Keep outdoor benches, chimneys, wells, barbecues and permanent garden structures unchanged. Keep the lamps, "
@@ -209,6 +215,12 @@ ACTIONS["complete"] = {
         "Never bend walls, stretch room corners, widen rooms, squash furniture, duplicate edges, "
         "apply local rubber-sheet warping or invent image borders. If a stronger correction would "
         "deform the scene, keep the safe partial correction. "
+        "6. SUNNY EXTERIORS: if this is an exterior photograph, replace an existing grey/rainy sky "
+        "with a natural clear blue sky for a sunny day. Harmonize exposure, white balance and light "
+        "on the building, vegetation and ground so the whole scene belongs to the same sunny day. "
+        "Subtle coherent sun glow or rays and believable soft sunlight/shadows are allowed; no "
+        "excessive lens flare, dramatic sunset or artificial saturation. Preserve the real landscape, "
+        "architecture, objects and door states. Never create sky in walls or interior ceilings. "
         "FINAL CHECK: verify cleanup across the whole image, straight architectural lines, natural "
         "proportions, faithful windows and clean light/color. Return only one edited photograph "
         "with the same orientation and aspect ratio as the input, without text or watermark."
@@ -240,12 +252,14 @@ def build_prompt(action_key: str, options: dict) -> str:
         )
     if action_key in {"auto_pro", "complete"}:
         guard += (
-            " ABSOLUTE PRESERVATION: keep the exact window glass, opacity, texture, frames, "
-            "curtains and the original exterior scene. Only improve its existing lighting, exposure "
-            "and white balance; never replace the sky, weather, vegetation or buildings, and never "
-            "invent hidden detail. Preserve mirrors, their frames, material, color and reflections; "
-            "do not redesign or replace fixtures, tiles, furniture or architectural elements. "
-            "These preservation rules take priority over window recovery, cleanup and enhancement."
+            " WINDOW AND SCENE RULES: preserve window frames, curtains, glazing texture and all "
+            "recoverable real exterior details. The ONLY permitted change to a completely white "
+            "window with no recoverable detail is a very subtle pale sky-blue-to-white gradient "
+            "within the glass; never invent a landscape. In exterior photographs, the requested "
+            "clear sunny sky and matching daylight may replace rainy weather; preserve the actual "
+            "buildings, vegetation and landscape. Preserve mirrors, their frames, material and "
+            "reflections; do not redesign fixtures, tiles, furniture or architectural elements. "
+            "The sky and white-window exceptions override any general scene-preservation wording."
         )
     return f"{prompt}\n\n{guard}"
 
