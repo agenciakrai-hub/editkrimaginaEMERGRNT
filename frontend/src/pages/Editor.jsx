@@ -367,7 +367,7 @@ export default function Editor() {
                       <span className="font-display font-semibold text-white">Mejora Pro</span>
                       <span className="text-[10px] font-semibold text-cyan-300 flex items-center gap-0.5"><Zap className="w-2.5 h-2.5" />{actions.find((a) => a.key === "auto_pro")?.cost}</span>
                     </div>
-                    <p className="text-xs text-slate-400 mt-0.5">Acabado profesional con IA · recupera ventanas</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Acabado Pro · ventanas y perspectiva</p>
                   </div>
                   <Sparkles className="w-4 h-4 text-fuchsia-300 shrink-0" />
                 </div>

@@ -182,6 +182,10 @@ ACTIONS = {
 }
 
 
+ACTIONS["auto_pro"]["prompt"] += "\nMANDATORY PHOTOGRAPHIC PERSPECTIVE CORRECTION: In addition to the existing enhancement above, correct camera roll and vertical keystone as with a tilt-shift lens. Use door jambs, window sides, wall corners and cabinet uprights as vertical guides: these must be plumb in the finished image. Apply one coherent global projective correction, with the minimum necessary crop; preserve the original viewpoint, room proportions, depth, textures and every object. Do not leave obvious tilted verticals unchanged. Keep naturally receding horizontal lines convergent. Never locally stretch furniture, bend walls, invent borders or add/remove content. This geometric correction is explicitly allowed even though all scene content must be preserved."
+
+ACTIONS["auto_pro"]["description"] = "Acabado profesional existente, ventanas y corrección de perspectiva."
+
 # Independent tools: exterior sunshine must never color interior white paint.
 ACTIONS["complete"] = {
     "label": "Mejora completa · Interior",
@@ -199,6 +203,8 @@ ACTIONS["complete_exterior"] = {
     "disclosure_default": True,
     "prompt": "Edit this EXTERIOR real-estate photograph into a bright natural CLEAR SUNNY DAY. This is the exterior-only tool; do not use interior flambient relighting.\n1. SKY AND DAYLIGHT: Replace only an existing grey/rainy/overcast sky with a natural clear blue sky, subtle atmospheric gradient and optional small soft white clouds. Harmonize building, vegetation and ground with neutral daylight and coherent realistic soft sunlight/shadows. Subtle sun glow is allowed, no dramatic rays, lens flare, sunset, orange/yellow grade or oversaturation. Do not create sky where there is a building, wall, roof or tree.\n2. COLOR: White facades and trim stay CLEAN NEUTRAL WHITE, never yellow, cream or beige. Preserve authentic colored materials, stone, tile and wood. Balance exposure and recover highlights and shadows without HDR halos.\n3. CLEANUP: Remove loose rubbish, bins, cables, power strips, cleaning supplies and small distracting loose objects. Repair superficial stains and cosmetic paint defects without redesigning the property. Preserve permanent garden structures, benches, wells, barbecues, chimneys, trees, planting, architecture and boundary walls. Keep ALL doors, garage doors, shutters, gates and windows in their exact original open/closed state and shape. Never reveal a hidden interior or change panels/handles.\n4. WINDOWS: Preserve real glazing/reflections and recover visible detail. For completely white glass only, allow a VERY SUBTLE pale sky-blue-to-white gradient; never invent a landscape or make frosted/opaque glass transparent.\n5. PERSPECTIVE: Level camera roll and conservatively correct architectural verticals with one coherent photographic correction and minimal crop. Preserve viewpoint, proportions, depth, orientation and aspect ratio. No local stretching, bent walls, warped roofs, duplicated structures or invented borders.\nFINAL AUDIT: verify sunny coherent lighting, neutral white facades, clean surfaces, faithful door states and straight architectural lines. Return one photorealistic photograph without text or watermark."
 }
+
+ACTIONS["complete"]["prompt"] += "\nREQUIRED GEOMETRY AUDIT: Use the vertical door jamb at the edge of the photo, both window sides, cabinet uprights and wall corners as measurable guides. Correct camera roll and vertical keystone so these upright architectural lines are plumb, using one global projective correction and the minimum necessary crop. Do not skip correction when these verticals visibly lean. Preserve natural receding horizontals and furniture proportions. Never distort furniture or change the viewpoint to obtain straight lines."
 
 STAGING_STYLES = {
     "nordico": "Scandinavian / Nordic",
@@ -218,6 +224,8 @@ def build_prompt(action_key: str, options: dict) -> str:
         # Each complete tool owns its scene rules, with no contradictory global grade.
         return prompt
     guard = STRICT_GUARD if action_key in STRICT_ACTIONS else GEO_GUARD
+    if action_key == "auto_pro":
+        guard = "Preserve every scene element, its authentic material, color and shape. A global photographic perspective correction and minimal crop are allowed; no local warping, content changes or invented borders."
     if action_key == "auto_pro":
         guard += (
             " Preserve frames, curtains, glazing texture, real exterior details and mirrors. "

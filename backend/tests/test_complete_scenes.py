@@ -43,3 +43,12 @@ def test_exterior_inherits_selected_krai_unless_explicitly_assigned(explicit):
     _,model = asyncio.run(ns["get_tool_override"]("complete_exterior"))
     assert model == "gemini-image"
     assert db.ai_providers.find_one.call_args.args[0]["id"] == ("krai-exterior" if explicit else "krai")
+
+
+def test_pro_keeps_existing_enhancement_and_adds_perspective_only():
+    p = ai_edit.build_prompt("auto_pro", {})
+    assert p.startswith("Professionally edit this real-estate photograph")
+    assert "MANDATORY PHOTOGRAPHIC PERSPECTIVE CORRECTION" in p
+    assert "do NOT add, remove, move or duplicate furniture or objects" in p
+    assert "global photographic perspective correction and minimal crop are allowed" in p
+    assert ai_edit.ACTIONS["auto_pro"]["cost"] == 1
