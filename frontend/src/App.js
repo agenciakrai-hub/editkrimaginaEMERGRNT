@@ -7,6 +7,8 @@ import Landing from "@/pages/Landing";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import AuthCallback from "@/pages/AuthCallback";
+import ManualEditor from "@/pages/ManualEditor";
+import HdrFusion from "@/pages/HdrFusion";
 import Dashboard from "@/pages/Dashboard";
 import PropertyView from "@/pages/PropertyView";
 import Editor from "@/pages/Editor";
@@ -22,6 +24,8 @@ function AppRouter() {
   }
   return (
     <Routes>
+      <Route path="/app/manual" element={<ProtectedRoute><ManualEditor /></ProtectedRoute>} />
+      <Route path="/app/hdr" element={<ProtectedRoute><HdrFusion /></ProtectedRoute>} />
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />

@@ -120,6 +120,8 @@ async def get_tool_override(action_key: str):
         return None
     overrides = settings.get("overrides") or {}
     ov = overrides.get(action_key)
+    if action_key in {"manual", "hdr"} and not ov:
+        ov = overrides.get("auto_pro")
     if action_key == "complete_exterior" and not ov:
         ov = overrides.get("complete")
     if action_key in {"complete", "complete_exterior"} and not ov:
@@ -149,12 +151,13 @@ async def get_tool_override(action_key: str):
             reason="El modelo seleccionado ya no está disponible en el proveedor.",
         )
     caps = ai_providers._ensure_caps(model)
-    manual = prov.get("enabled", {}).get(ov["model_id"], {}).get("photo")
-    if not (caps.get("image_edit") or manual):
+    capability = "video" if action_key == "video" else "image_edit"
+    manual = prov.get("enabled", {}).get(ov["model_id"], {}).get("video" if action_key == "video" else "photo")
+    if not (caps.get(capability) or manual):
         raise ProviderEditError(
             provider=prov.get("name") or prov.get("type") or "proveedor",
             model=ov["model_id"],
-            reason="El modelo seleccionado no puede editar imágenes (imagen → imagen).",
+            reason="El modelo seleccionado no puede generar vídeo." if action_key == "video" else "El modelo seleccionado no puede editar imágenes (imagen → imagen).",
         )
     return prov, ov["model_id"]
 
@@ -968,7 +971,7 @@ def _video_public(v: dict) -> dict:
     }
 
 
-async def _process_video(video_id, user_id, items, fmt, title, subtitle, music, cost, watermark=None):
+async def _process_video(video_id, user_id, items, fmt, title, subtitle, music, cost, watermark=None, engine=None):
     tmpdir = tempfile.mkdtemp()
     try:
         logo_bytes = None
@@ -993,7 +996,16 @@ async def _process_video(video_id, user_id, items, fmt, title, subtitle, music, 
             fp = os.path.join(tmpdir, f"src{i}.jpg")
             with open(fp, "wb") as fh:
                 fh.write(data)
-            local_items.append({"path": fp, "motion": it.get("motion", "ken_burns"), "secs": it.get("secs")})
+            clip_item={"path": fp, "motion": it.get("motion", "ken_burns"), "secs": it.get("secs")}
+            if engine:
+                from video_provider import run_video
+                provider, model = engine
+                prompt = "Create a photorealistic real-estate camera movement from the supplied photo. Preserve the actual architecture, furniture, colors and geometry. No added or removed objects, people or text. Camera movement: " + it.get("motion","ken_burns") + ". " + str(it.get("prompt", ""))[:1000]
+                clip_bytes=await asyncio.to_thread(run_video,provider,model,data,prompt,it.get("secs",3.5),"16:9" if fmt=="tour" else "9:16")
+                clip_path=os.path.join(tmpdir,f"ai{i}.mp4")
+                with open(clip_path,"wb") as f: f.write(clip_bytes)
+                clip_item["video_path"]=clip_path
+            local_items.append(clip_item)
         out = os.path.join(tmpdir, "out.mp4")
         await video_gen.generate_video(local_items, out, fmt=fmt, title=title, subtitle=subtitle, music=music)
         with open(out, "rb") as fh:
@@ -1005,7 +1017,7 @@ async def _process_video(video_id, user_id, items, fmt, title, subtitle, music, 
             {"$set": {"status": "done", "storage_path": stored["path"],
                       "finished_at": datetime.now(timezone.utc).isoformat()}},
         )
-        await log_usage(user_id, "video", fmt, VIDEO_COSTS.get(fmt, 0), 0, "ffmpeg", None)
+        await log_usage(user_id, "video", fmt, VIDEO_COSTS.get(fmt, 0), 0, engine[0].get("name","KRAI") if engine else "ffmpeg", engine[1] if engine else None, ai_calls=len(local_items) if engine else 0)
     except Exception:
         logger.exception("video generation failed")
         if cost > 0:
@@ -1048,10 +1060,17 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
             except (TypeError, ValueError):
                 secs = default_secs
             secs = min(max(secs, 1.5), 8.0)
-            items.append({"path": p.get("current_path") or p["original_path"], "motion": motion, "secs": secs})
+            items.append({"path": p.get("current_path") or p["original_path"], "motion": motion, "secs": secs, "prompt": str(c.get("prompt") or "")[:1000]})
     if not items:
         items = [{"path": p.get("current_path") or p["original_path"], "motion": "ken_burns", "secs": default_secs} for p in photos]
 
+    items = items[:30 if fmt == "tour" else 8]
+    try:
+        engine=await get_tool_override("video")
+    except ProviderEditError as e:
+        raise HTTPException(e.status_code,e.reason)
+    if engine and not ai_providers.is_krai_gateway(engine[0].get("base_url")):
+        raise HTTPException(400,"Selecciona KRAI para generar vídeo con IA")
     cost = 0 if is_owner(user) else VIDEO_COSTS[fmt]
     if cost > 0:
         fresh = await db.users.find_one({"user_id": user["user_id"]})
@@ -1059,7 +1078,7 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
             raise HTTPException(status_code=402, detail=f"Necesitas {cost} créditos para generar este video")
         await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": -cost}})
 
-    eta_seconds = int(2.2 + sum(it["secs"] for it in items) + 6)
+    eta_seconds = (120 * len(items) if engine else 0) + int(2.2 + sum(it["secs"] for it in items) + 6)
     video_doc = {
         "id": str(uuid.uuid4()),
         "user_id": user["user_id"],
@@ -1074,7 +1093,7 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
     await db.videos.insert_one(video_doc)
     subtitle = data.agency_name or prop.get("address") or ""
     watermark = {**WATERMARK_DEFAULTS, **(user.get("watermark") or {})}
-    asyncio.create_task(_process_video(video_doc["id"], user["user_id"], items, fmt, prop["name"], subtitle, data.music, cost, watermark))
+    asyncio.create_task(_process_video(video_doc["id"], user["user_id"], items, fmt, prop["name"], subtitle, data.music, cost, watermark, engine))
     return {"video_id": video_doc["id"], "cost": cost, "eta_seconds": eta_seconds}
 
 
@@ -1204,6 +1223,9 @@ async def root():
 
 
 register_admin_routes(api, db, current_user, ai_edit.ACTIONS)
+
+from studio_tools import register_studio_routes
+register_studio_routes(api, db, current_user, get_tool_override, is_owner, log_usage)
 
 app.include_router(api)
 

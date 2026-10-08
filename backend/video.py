@@ -88,6 +88,10 @@ def _motion_vf(motion: str, w: int, h: int, frames: int, fps: int) -> str:
 async def _make_clip(item: dict, out_path: str, w: int, h: int) -> None:
     fps = 25
     secs = float(item.get("secs", 3.5))
+    if item.get("video_path"):
+        vf=f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,fps=25,format=yuv420p"
+        await _run(["ffmpeg","-y","-i",item["video_path"],"-vf",vf,"-t",str(secs),"-an","-c:v","libx264","-preset","ultrafast","-crf","26","-threads","2",out_path])
+        return
     motion = item.get("motion", "ken_burns")
     frames = max(int(secs * fps), 2)
     vf = (

@@ -16,6 +16,7 @@ from fastapi import HTTPException, Depends, Request
 from pydantic import BaseModel
 
 import providers as ai_providers
+from studio_tools import STUDIO_TOOLS
 
 logger = logging.getLogger("watchful.admin")
 
@@ -296,11 +297,12 @@ def register_admin_routes(api, db, current_user, action_catalog):
             {"action": k, "label": v["label"], "category": v["category"], "cost": v["cost"]}
             for k, v in action_catalog.items() if k not in _fixed
         ]
+        tools += [{"action":k, **v} for k,v in STUDIO_TOOLS.items()]
         return {"tools": tools, "overrides": overrides, "photo_models": photo_models, "video_models": video_models}
 
     @api.put("/admin/tool-overrides")
     async def admin_set_override(data: ToolOverrideInput, _: dict = Depends(require_admin)):
-        if data.action not in action_catalog:
+        if data.action not in action_catalog and data.action not in STUDIO_TOOLS:
             raise HTTPException(status_code=400, detail="Herramienta no válida")
         settings = await db.ai_settings.find_one({"id": "tool_overrides"}) or {"overrides": {}}
         overrides = settings.get("overrides", {})
@@ -314,9 +316,10 @@ def register_admin_routes(api, db, current_user, action_catalog):
             if not model:
                 raise HTTPException(status_code=400, detail="Modelo no encontrado en el proveedor")
             caps = ai_providers._ensure_caps(model)
-            manual = provider.get("enabled", {}).get(data.model_id, {}).get("photo")
-            if not (caps.get("image_edit") or manual):
-                raise HTTPException(status_code=400, detail="El modelo seleccionado no puede editar imágenes. Márcalo manualmente como editor en la tarjeta del proveedor si sabes que lo soporta.")
+            capability = "video" if data.action == "video" else "image_edit"
+            manual = provider.get("enabled", {}).get(data.model_id, {}).get("video" if data.action == "video" else "photo")
+            if not (caps.get(capability) or manual):
+                raise HTTPException(status_code=400, detail="El modelo seleccionado no puede generar vídeo." if data.action == "video" else "El modelo seleccionado no puede editar imágenes. Márcalo manualmente como editor en la tarjeta del proveedor si sabes que lo soporta.")
             overrides[data.action] = {"provider_id": data.provider_id, "model_id": data.model_id}
         else:
             overrides.pop(data.action, None)

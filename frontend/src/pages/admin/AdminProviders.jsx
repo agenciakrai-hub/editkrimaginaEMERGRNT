@@ -245,7 +245,7 @@ function ToolOverrides() {
   };
 
   if (!data) return <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-cyan-400" /></div>;
-  const { tools, overrides, photo_models } = data;
+  const { tools, overrides, photo_models, video_models = [] } = data;
   const activeCount = Object.keys(overrides || {}).length;
 
   return (
@@ -266,7 +266,7 @@ function ToolOverrides() {
       <table className="w-full text-sm" data-testid="tool-overrides-table">
         <thead className="bg-white/5 text-slate-400">
           <tr>
-            <th className="text-left px-4 py-3 font-medium">Herramienta de foto</th>
+            <th className="text-left px-4 py-3 font-medium">Herramienta</th>
             <th className="text-left px-4 py-3 font-medium">Motor asignado</th>
           </tr>
         </thead>
@@ -276,13 +276,13 @@ function ToolOverrides() {
             const current = ov ? `${ov.provider_id}::${ov.model_id}` : "default";
             return (
               <tr key={t.action} className="border-t border-white/5">
-                <td className="px-4 py-3 text-white">{t.label}<span className="text-xs text-slate-500 ml-2">{t.cost} créd.</span></td>
+                <td className="px-4 py-3 text-white">{t.label}<span className="text-xs text-slate-500 ml-2">{t.action === "video" ? "Según formato" : `${t.cost} créd.`}</span></td>
                 <td className="px-4 py-3">
                   <Select value={current} onValueChange={(v) => setOverride(t.action, v)}>
                     <SelectTrigger data-testid={`tool-select-${t.action}`} className="bg-secondary/60 border-white/10 max-w-xs"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-[#1E1A29] border-white/10 text-white">
-                      <SelectItem value="default">Sin asignación</SelectItem>
-                      {photo_models.map((m) => (
+                      <SelectItem value="default">{t.action === "video" ? "Montaje actual · sin IA" : ["manual","hdr"].includes(t.action) ? "Usar KRAI de Mejora Pro" : "Sin asignación"}</SelectItem>
+                      {(t.category === "video" ? video_models : photo_models).map((m) => (
                         <SelectItem key={`${m.provider_id}::${m.model_id}`} value={`${m.provider_id}::${m.model_id}`}>
                           {m.provider_name} · {m.model_name}
                         </SelectItem>
