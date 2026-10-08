@@ -31,7 +31,7 @@ class KraiRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.env = dict(asyncio=asyncio, Optional=Optional, uuid=uuid, datetime=datetime, timezone=timezone,
             get_tool_override=self.lookup, db=SimpleNamespace(photos=self.photos),
             ai_edit=SimpleNamespace(ACTIONS=ai_edit.ACTIONS, MODEL="forbidden", run_edit=self.fallback, build_prompt=ai_edit.build_prompt,
-                                   _validate_complete_result=ai_edit._validate_complete_result),
+                                   _validate_complete_result=ai_edit._validate_complete_result, PERSPECTIVE_ONLY_PROMPT=ai_edit.PERSPECTIVE_ONLY_PROMPT),
             ai_providers=SimpleNamespace(is_krai_gateway=lambda u:u == "krai", run_image_edit=self.engine,
                 image_mime=lambda b:"image/jpeg", ProviderRequestError=RuntimeError),
             storage=SimpleNamespace(get_object=Mock(return_value=(self.data,"image/jpeg")), put_object=self.store, APP_NAME="test"),
@@ -84,3 +84,28 @@ class KraiRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.engine.assert_called_once()
         self.env["local_edit"].run.assert_not_called()
         self.fallback.assert_not_awaited()
+
+    async def test_pro_uses_same_krai_for_dedicated_perspective(self):
+        intermediate = image((1200,800))
+        final = image((900,600))
+        self.engine.side_effect = [intermediate, final]
+        await self.apply(self.photo,"auto_pro",{},None)
+        self.assertEqual(self.engine.call_count,2)
+        self.assertEqual(self.engine.call_args.args[0],self.lookup.return_value[0])
+        self.assertEqual(self.engine.call_args.args[1],"gemini-image")
+        self.assertEqual(self.engine.call_args.args[2],intermediate)
+        self.assertEqual(self.engine.call_args.args[3],ai_edit.PERSPECTIVE_ONLY_PROMPT)
+        self.assertEqual(self.store.call_args.args[1],final)
+        self.assertEqual(self.env["log_usage"].call_args.kwargs["ai_calls"],2)
+        self.photos.update_one.assert_awaited_once()
+
+    async def test_second_pass_failure_does_not_commit_partial_edit(self):
+        self.engine.side_effect = [self.data,RuntimeError("perspective failed")]
+        with self.assertRaises(self.error): await self.apply(self.photo,"complete",{},None)
+        self.store.assert_not_called()
+        self.photos.update_one.assert_not_awaited()
+        self.fallback.assert_not_awaited()
+
+    async def test_exterior_keeps_approved_single_pass(self):
+        await self.apply(self.photo,"complete_exterior",{},None)
+        self.engine.assert_called_once()

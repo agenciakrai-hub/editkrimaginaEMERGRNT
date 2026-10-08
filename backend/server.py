@@ -89,7 +89,7 @@ def is_super_admin(user: dict) -> bool:
     return user.get("email", "").lower() in SUPER_ADMIN_EMAILS
 
 
-async def log_usage(user_id: str, kind: str, action: str, credits: int, gemini_calls: int, provider: str, model: str = None):
+async def log_usage(user_id: str, kind: str, action: str, credits: int, gemini_calls: int, provider: str, model: str = None, ai_calls: Optional[int] = None):
     """Record a consumption event for the admin usage dashboard."""
     try:
         await db.usage_events.insert_one({
@@ -99,7 +99,7 @@ async def log_usage(user_id: str, kind: str, action: str, credits: int, gemini_c
             "action": action,
             "credits": credits,
             "gemini_calls": gemini_calls,
-            "ai_calls": 1 if kind == "photo" else 0,
+            "ai_calls": (1 if kind == "photo" else 0) if ai_calls is None else ai_calls,
             "provider": provider,
             "model": model,
             "at": datetime.now(timezone.utc).isoformat(),
@@ -584,11 +584,17 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     used_model = "opencv"
     gemini_calls = 0
     is_local = False
+    ai_calls = 0
     if override:
         prov, model_id = override
         prompt = ai_edit.build_prompt(action_key, options)
         try:
             result_bytes = await asyncio.to_thread(ai_providers.run_image_edit, prov, model_id, data, prompt)
+            ai_calls = 1
+            if action_key in {"auto_pro", "complete"} and result_bytes:
+                ai_edit._validate_complete_result(data, result_bytes)
+                result_bytes = await asyncio.to_thread(ai_providers.run_image_edit, prov, model_id, result_bytes, ai_edit.PERSPECTIVE_ONLY_PROMPT)
+                ai_calls = 2
             used_provider = prov.get("name") or prov.get("type")
             used_model = model_id
             gemini_calls = 0
@@ -620,7 +626,7 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
         raise ProviderEditError(provider="KRAI", model=used_model,
             reason="El proveedor no devolvió una imagen. No se usará un motor alternativo.",
             code="no_image")
-    if action_key in {"complete", "complete_exterior"}:
+    if action_key in {"auto_pro", "complete", "complete_exterior", "perspective_pro"}:
         try:
             ai_edit._validate_complete_result(data, result_bytes)
         except Exception as exc:
@@ -646,7 +652,7 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
             "$push": {"edits": edit_entry},
         },
     )
-    await log_usage(photo["user_id"], "photo", action_key, action["cost"], gemini_calls, used_provider, used_model)
+    await log_usage(photo["user_id"], "photo", action_key, action["cost"], gemini_calls, used_provider, used_model, ai_calls=ai_calls)
     return await db.photos.find_one({"id": photo["id"]}, {"_id": 0})
 
 
@@ -882,12 +888,18 @@ async def batch_edit(property_id: str, data: BatchInput, user: dict = Depends(cu
         raise HTTPException(status_code=404, detail="Propiedad no encontrada")
 
     query = {"property_id": property_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}
-    if data.photo_ids:
-        query["id"] = {"$in": data.photo_ids}
+    if data.photo_ids is not None:
+        if not data.photo_ids:
+            raise HTTPException(status_code=400, detail="Selecciona al menos una foto para editar el lote")
+        query["id"] = {"$in": list(dict.fromkeys(data.photo_ids))}
     photos = await db.photos.find(query, {"_id": 0}).to_list(1000)
     if not photos:
         raise HTTPException(status_code=400, detail="No hay fotos para procesar")
 
+    if data.photo_ids is not None and len(photos) != len(set(data.photo_ids)):
+        raise HTTPException(status_code=400, detail="La selección contiene fotos no disponibles en esta propiedad")
+    if any(p.get("status") == "processing" for p in photos):
+        raise HTTPException(status_code=409, detail="Hay fotos seleccionadas que ya se están procesando")
     unit_cost = 0 if is_owner(user) else ai_edit.ACTIONS[data.action]["cost"]
     total_cost = unit_cost * len(photos)
     if total_cost > 0:

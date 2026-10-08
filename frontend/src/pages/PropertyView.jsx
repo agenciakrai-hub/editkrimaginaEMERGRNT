@@ -51,6 +51,10 @@ export default function PropertyView() {
   const fileRef = useRef(null);
   const [prop, setProp] = useState(null);
   const [photos, setPhotos] = useState([]);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const selectedPhotos = photos.filter((p) => selectedIds.includes(p.id));
+  const togglePhoto = (photoId) => setSelectedIds((prev) => prev.includes(photoId) ? prev.filter((v) => v !== photoId) : [...prev, photoId]);
+  useEffect(() => { setSelectedIds([]); }, [id]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [actions, setActions] = useState([]);
@@ -177,11 +181,12 @@ export default function PropertyView() {
   };
 
   const selectedAction = actions.find((a) => a.key === batchAction);
-  const batchCost = selectedAction ? selectedAction.cost * photos.length : 0;
+  const batchCost = selectedAction ? selectedAction.cost * selectedPhotos.length : 0;
 
   const startBatch = async () => {
+    if (!selectedPhotos.length || job) return;
     try {
-      const { data } = await api.post(`/properties/${id}/batch`, { action: batchAction });
+      const { data } = await api.post(`/properties/${id}/batch`, { action: batchAction, photo_ids: selectedPhotos.map((p) => p.id) });
       setBatchOpen(false);
       setJob({ ...data, done: 0, failed: 0, processed: 0, status: "processing" });
       pollJob(data.job_id);
@@ -193,11 +198,12 @@ export default function PropertyView() {
   };
 
   const applyAutoAll = async () => {
+    if (!selectedPhotos.length || job) return;
     try {
-      const { data } = await api.post(`/properties/${id}/batch`, { action: "auto" });
+      const { data } = await api.post(`/properties/${id}/batch`, { action: "auto", photo_ids: selectedPhotos.map((p) => p.id) });
       setJob({ ...data, done: 0, failed: 0, processed: 0, status: "processing" });
       pollJob(data.job_id);
-      toast.success(`Mejorando ${photos.length} fotos…`);
+      toast.success(`Mejorando ${selectedPhotos.length} fotos seleccionadas…`);
     } catch (err) {
       toast.error(apiError(err));
     }
@@ -252,11 +258,11 @@ export default function PropertyView() {
             {prop?.address && <p className="text-slate-400 mt-1">{prop.address}</p>}
           </div>
           <div className="flex gap-3 flex-wrap">
-            <Button onClick={applyAutoAll} disabled={!photos.length || !!job} data-testid="auto-all-btn"
+            <Button onClick={applyAutoAll} disabled={!selectedPhotos.length || !!job} data-testid="auto-all-btn"
               className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
-              <Wand2 className="w-4 h-4 mr-1.5" /> Mejorar todas <span className="ml-1.5 text-[10px] font-bold text-emerald-200">GRATIS</span>
+              <Wand2 className="w-4 h-4 mr-1.5" /> Mejorar seleccionadas <span className="ml-1.5 text-[10px] font-bold text-emerald-200">GRATIS</span>
             </Button>
-            <Button onClick={() => setBatchOpen(true)} disabled={!photos.length} data-testid="batch-edit-btn"
+            <Button onClick={() => setBatchOpen(true)} disabled={!selectedPhotos.length || !!job} data-testid="batch-edit-btn"
               variant="outline" className="rounded-full border-white/15 bg-white/5 hover:bg-white/10 text-white">
               <Layers className="w-4 h-4 mr-1.5" /> Editar por lote
             </Button>
@@ -295,6 +301,15 @@ export default function PropertyView() {
               data-testid="file-input" onChange={(e) => handleFiles(e.target.files)} />
           </div>
         </div>
+
+        {photos.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 mb-5 rounded-xl border border-white/10 bg-white/5 p-3" data-testid="photo-selection-bar">
+            <span className="text-sm text-cyan-200" aria-live="polite" data-testid="selection-count">{selectedPhotos.length} de {photos.length} fotos seleccionadas</span>
+            <Button variant="ghost" size="sm" disabled={!!job} onClick={() => setSelectedIds(photos.map((p) => p.id))} data-testid="select-all-photos">Seleccionar todas</Button>
+            <Button variant="ghost" size="sm" disabled={!!job || !selectedPhotos.length} onClick={() => setSelectedIds([])} data-testid="clear-photo-selection">Quitar selección</Button>
+            <span className="text-xs text-slate-400">Marca las fotos de interior o exterior para editar solo ese grupo.</span>
+          </div>
+        )}
 
         {/* Job progress */}
         {job && (
@@ -335,6 +350,9 @@ export default function PropertyView() {
                   <AuthImage path={p.current_path} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                 </div>
                 <div className="absolute top-2 left-2">{statusBadge(p)}</div>
+                <label className="absolute bottom-2 right-2 z-10 flex items-center gap-1.5 rounded-full bg-black/80 px-2.5 py-1.5 text-xs text-white cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox" checked={selectedIds.includes(p.id)} disabled={!!job || p.status === "processing"} onChange={() => togglePhoto(p.id)} aria-label={`Seleccionar foto ${i + 1}`} data-testid={`select-photo-${p.id}`} /> Seleccionar
+                </label>
                 {p.disclosure && (
                   <div className="absolute bottom-2 left-2 right-2">
                     <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-black/70 text-amber-300" title="Imagen editada digitalmente">
@@ -400,7 +418,7 @@ export default function PropertyView() {
         <DialogContent className="bg-[#1E1A29] border-white/10 text-white">
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Layers className="w-5 h-5 text-cyan-400" /> Editar por lote</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
-            <p className="text-sm text-slate-400">Aplica una edición a las {photos.length} fotos de esta propiedad.</p>
+            <p className="text-sm text-slate-400">Se editarán solo las {selectedPhotos.length} fotos seleccionadas. El resto conservará su edición actual.</p>
             <Select value={batchAction} onValueChange={setBatchAction}>
               <SelectTrigger data-testid="batch-action-select" className="bg-secondary/60 border-white/10">
                 <SelectValue placeholder="Elige una acción" />
@@ -424,9 +442,9 @@ export default function PropertyView() {
             )}
           </div>
           <DialogFooter>
-            <Button onClick={startBatch} disabled={!batchAction} data-testid="batch-confirm"
+            <Button onClick={startBatch} disabled={!batchAction || !selectedPhotos.length || !!job} data-testid="batch-confirm"
               className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
-              Aplicar a {photos.length} fotos
+              Aplicar a {selectedPhotos.length} fotos seleccionadas
             </Button>
           </DialogFooter>
         </DialogContent>

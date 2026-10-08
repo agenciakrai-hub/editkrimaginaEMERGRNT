@@ -214,8 +214,13 @@ STAGING_STYLES = {
 }
 
 
+PERSPECTIVE_ONLY_PROMPT = "Perform ONLY a photographic perspective correction on this already edited real-estate photograph. Do not re-edit its lighting, white balance, colors, windows, sky, textures or objects. Correct camera roll and vertical keystone using a single coherent global projective transformation, equivalent to Lightroom Upright Vertical / a shift lens. Door jambs, window frame sides, cabinet uprights and wall corners must be parallel to the image's vertical axis from top to bottom, not leaning inward or outward. In particular align both edges of the tall wooden cabinet, both sides of the back window and both door jambs wherever present. Preserve natural convergence of receding horizontal lines; do not force all horizontals flat. Maintain realistic room depth, furniture proportions and viewpoint; no local stretching or bending. Crop only the minimum needed to remove empty borders, preserve the input orientation and aspect ratio, and do not invent borders. Every object, furnishing, wall picture, lamp, open/closed door and exterior detail must remain exactly as supplied. If already plumb, leave geometry unchanged. Return only the corrected photograph."
+
+
 def build_prompt(action_key: str, options: dict) -> str:
     action = ACTIONS[action_key]
+    if action_key == "perspective_pro":
+        return PERSPECTIVE_ONLY_PROMPT
     prompt = action["prompt"]
     if action_key == "staging":
         style_key = (options or {}).get("style", "nordico")
