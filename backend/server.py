@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 import requests
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Form, Query, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Form, Query, Depends, BackgroundTasks
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
@@ -458,6 +458,7 @@ def _photo_public(p: dict) -> dict:
         "current_path": p.get("current_path") or p["original_path"],
         "original_filename": p.get("original_filename"),
         "status": p.get("status", "ready"),
+        "edit_job_id": p.get("edit_job_id"),
         "disclosure": p.get("disclosure", False),
         "edits": p.get("edits", []),
         "can_undo": _can_undo_photo(p),
@@ -668,7 +669,7 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     stored = await asyncio.to_thread(storage.put_object, out_path, result_bytes, output_mime)
     action = ai_edit.ACTIONS[action_key]
     disc = action["disclosure_default"] if disclosure is None else disclosure
-    edit_entry = {"action": action_key, "label": action["label"], "at": datetime.now(timezone.utc).isoformat(),
+    edit_entry = {"job_id": photo.get("edit_job_id"), "action": action_key, "label": action["label"], "at": datetime.now(timezone.utc).isoformat(),
                   "before_path": src_path, "before_disclosure": bool(photo.get("disclosure", False)), "disclosure": bool(disc)}
     await db.photos.update_one(
         {"id": photo["id"]},
@@ -680,6 +681,78 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     )
     await log_usage(photo["user_id"], "photo", action_key, action["cost"], gemini_calls, used_provider, used_model, ai_calls=ai_calls)
     return await db.photos.find_one({"id": photo["id"]}, {"_id": 0})
+
+
+
+
+@api.post("/photos/{photo_id}/edit-async")
+async def start_photo_edit(photo_id: str, data: EditInput, background: BackgroundTasks, user: dict = Depends(current_user)):
+    if data.action not in ai_edit.ACTIONS:
+        raise HTTPException(status_code=400, detail="Acción no válida")
+    query = {"id": photo_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}
+    photo = await db.photos.find_one(query, {"_id": 0})
+    if not photo:
+        raise HTTPException(status_code=404, detail="Foto no encontrada")
+    if photo.get("status") == "processing":
+        active = await db.jobs.find_one({"id": photo.get("edit_job_id"), "user_id": user["user_id"], "kind": "photo_edit", "status": {"$in": ["starting", "processing"]}}, {"_id": 0})
+        if active:
+            return {"job_id": active["id"], "status": active["status"]}
+        raise HTTPException(status_code=409, detail="Esta foto ya se está editando. Espera a que termine antes de aplicar otra herramienta.")
+    job_id = str(uuid.uuid4())
+    locked = await db.photos.update_one({**query, "status": {"$ne": "processing"}}, {"$set": {"status": "processing", "edit_job_id": job_id}})
+    if not locked.modified_count:
+        raise HTTPException(status_code=409, detail="Esta foto ya se está editando. Vuelve a abrirla para ver el progreso.")
+    charge = 0 if is_owner(user) else ai_edit.ACTIONS[data.action]["cost"]
+    job = {"id": job_id, "kind": "photo_edit", "photo_id": photo_id, "user_id": user["user_id"], "status": "starting", "action": data.action, "label": ai_edit.ACTIONS[data.action]["label"], "charge": charge, "total": 1, "done": 0, "failed": 0, "processed": 0, "created_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        await db.jobs.insert_one(job)
+        if charge:
+            debit = await db.users.update_one({"user_id": user["user_id"], "credits": {"$gte": charge}}, {"$inc": {"credits": -charge}, "$addToSet": {"photo_edit_charges": job_id}})
+            if not debit.modified_count:
+                raise HTTPException(status_code=402, detail="Créditos insuficientes")
+        await db.jobs.update_one({"id": job_id}, {"$set": {"status": "processing"}})
+        photo["edit_job_id"] = job_id
+        background.add_task(_process_photo_edit, job_id, photo, data)
+    except Exception:
+        await _refund_photo_edit(job)
+        await db.jobs.update_one({"id": job_id}, {"$set": {"status": "failed", "failed": 1, "processed": 1, "error_message": "No se pudo iniciar la edición."}})
+        await db.photos.update_one({**query, "edit_job_id": job_id}, {"$set": {"status": "ready", "edit_job_id": None}})
+        raise
+    return {"job_id": job_id, "status": "processing"}
+
+
+async def _refund_photo_edit(job):
+    if job.get("charge"):
+        await db.users.update_one({"user_id": job["user_id"], "photo_edit_charges": job["id"]}, {"$inc": {"credits": job["charge"]}, "$pull": {"photo_edit_charges": job["id"]}})
+
+
+async def _process_photo_edit(job_id, photo, data):
+    job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+    try:
+        await _apply_edit(photo, data.action, data.options, data.disclosure)
+    except Exception as exc:
+        logger.exception("Background photo edit failed: job=%s", job_id)
+        message = exc.reason if isinstance(exc, ProviderEditError) else "La edición no pudo completarse. Se conserva la imagen anterior y se reembolsan los créditos cobrados."
+        await _refund_photo_edit(job)
+        await db.jobs.update_one({"id": job_id}, {"$set": {"status": "failed", "failed": 1, "processed": 1, "error_message": message}})
+    else:
+        await db.users.update_one({"user_id": photo["user_id"]}, {"$pull": {"photo_edit_charges": job_id}})
+        await db.jobs.update_one({"id": job_id}, {"$set": {"status": "done", "done": 1, "processed": 1}})
+    finally:
+        await db.photos.update_one({"id": photo["id"], "edit_job_id": job_id}, {"$set": {"status": "ready", "edit_job_id": None}})
+
+
+async def _recover_photo_edit_jobs():
+    jobs = await db.jobs.find({"kind": "photo_edit", "status": {"$in": ["starting", "processing"]}}, {"_id": 0}).to_list(1000)
+    for job in jobs:
+        photo = await db.photos.find_one({"id": job["photo_id"], "user_id": job["user_id"]}, {"_id": 0})
+        saved = bool(photo and any(e.get("job_id") == job["id"] for e in photo.get("edits", [])))
+        if saved:
+            await db.users.update_one({"user_id": job["user_id"]}, {"$pull": {"photo_edit_charges": job["id"]}})
+        else:
+            await _refund_photo_edit(job)
+        await db.jobs.update_one({"id": job["id"]}, {"$set": {"status": "done" if saved else "interrupted", "done": int(saved), "failed": int(not saved), "processed": 1, "error_message": None if saved else "La edición se interrumpió al reiniciarse el servidor. Se conserva la imagen anterior y se reembolsan los créditos cobrados."}})
+        await db.photos.update_one({"id": job["photo_id"], "edit_job_id": job["id"]}, {"$set": {"status": "ready", "edit_job_id": None}})
 
 
 @api.post("/photos/{photo_id}/edit")
@@ -1323,6 +1396,7 @@ async def startup():
             await db.users.update_one({"user_id": v["user_id"]}, {"$inc": {"credits": v["cost"]}})
     if orphaned_videos:
         logger.info("Recovered %s orphaned videos", len(orphaned_videos))
+    await _recover_photo_edit_jobs()
     await db.photos.update_many({"status": "processing"}, {"$set": {"status": "ready"}})
     await db.jobs.update_many({"status": "processing"}, {"$set": {"status": "interrupted", "error_message": "El lote se interrumpió antes de completar todas las fotos. Las ediciones guardadas se conservan; revisa las pendientes antes de reintentarlas."}})
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, apiError, fileUrl, exportUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -21,6 +21,7 @@ import {
   Sun, Sparkles, SlidersHorizontal, Moon, Eraser, Trees, PanelTop, Sofa, Maximize, Wand2, Frame, Stars,
 } from "lucide-react";
 import { toast } from "sonner";
+import { watchBatch } from "@/lib/watchBatch";
 
 const ICONS = {
   auto: Wand2, sky: Sun, light: Sparkles, straighten: SlidersHorizontal, twilight: Moon,
@@ -45,10 +46,13 @@ export default function Editor() {
   const { id, photoId } = useParams();
   const navigate = useNavigate();
   const { user, updateCredits } = useAuth();
+  const updateCreditsRef = useRef(updateCredits);
+  updateCreditsRef.current = updateCredits;
   const [photo, setPhoto] = useState(null);
   const [actions, setActions] = useState([]);
   const [compare, setCompare] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [editJobId, setEditJobId] = useState(null);
 
   const [confirmAction, setConfirmAction] = useState(null);
   const [style, setStyle] = useState("nordico");
@@ -73,6 +77,8 @@ export default function Editor() {
   useEffect(() => {
     let cancelled = false;
     setPhoto(null);
+    setEditJobId(null);
+    setProcessing(false);
     setConfirmAction(null);
     setEraserOpen(false);
     setCompare(false);
@@ -80,6 +86,7 @@ export default function Editor() {
       .then(([ph, ac, list]) => {
         if (cancelled) return;
         setPhoto(ph.data);
+        if (ph.data.status === "processing" && ph.data.edit_job_id) { setEditJobId(ph.data.edit_job_id); setProcessing(true); }
         setActions(ac.data);
         setPhotos(list.data);
         setCompare(ph.data.edits?.length > 0);
@@ -115,39 +122,53 @@ export default function Editor() {
     setConfirmAction(action);
   };
 
-  const apply = async () => {
-    const action = confirmAction;
-    setConfirmAction(null);
+  useEffect(() => {
+    if (!editJobId) return;
+    return watchBatch({
+      readJob: async () => (await api.get("/jobs/" + editJobId, { timeout: 15000, params: { _refresh: Date.now() } })).data,
+      readPhotos: async () => {
+        const [ph, me] = await Promise.all([api.get("/photos/" + photoId, { timeout: 15000 }), api.get("/auth/me", { timeout: 15000 })]);
+        return { photo: ph.data, credits: me.data.credits };
+      },
+      onJob: () => {},
+      onPhotos: (result) => { setPhoto(result.photo); updateCreditsRef.current(result.credits); setCompare(!!result.photo.edits?.length); },
+      onComplete: (job) => {
+        setEditJobId(null); setProcessing(false);
+        if (job.status === "done") toast.success((job.label || "Edición") + " aplicada");
+        else toast.error(job.error_message || "La edición no pudo completarse. Se conserva la imagen anterior.");
+      },
+      onError: () => { setEditJobId(null); setProcessing(false); toast.error("No se pudo consultar el progreso. Vuelve a abrir esta foto para recuperar el estado; no es necesario volver a aplicar la herramienta."); },
+    });
+  }, [editJobId, photoId]);
+
+  const beginEdit = async (body) => {
+    if (busy) return;
     setProcessing(true);
     try {
-      const body = { action: action.key, disclosure };
-      if (action.key === "staging") body.options = { style };
-      const { data } = await api.post(`/photos/${photoId}/edit`, body);
-      setPhoto(data.photo);
-      updateCredits(data.credits);
-      setCompare(true);
-      toast.success(`${action.label} aplicado`);
+      const { data } = await api.post("/photos/" + photoId + "/edit-async", body, { timeout: 15000 });
+      setEditJobId(data.job_id);
     } catch (err) {
-      toast.error(apiError(err));
-    } finally {
+      // A lost start response must not trigger another charged edit.
+      try {
+        const { data } = await api.get("/photos/" + photoId);
+        setPhoto(data);
+        if (data.status === "processing" && data.edit_job_id) { setEditJobId(data.edit_job_id); return; }
+      } catch (_) {}
       setProcessing(false);
+      toast.error(apiError(err));
     }
   };
 
-  const applyAuto = async () => {
-    setProcessing(true);
-    try {
-      const { data } = await api.post(`/photos/${photoId}/edit`, { action: "auto" });
-      setPhoto(data.photo);
-      updateCredits(data.credits);
-      setCompare(true);
-      toast.success("Mejora automática aplicada ✨");
-    } catch (err) {
-      toast.error(apiError(err));
-    } finally {
-      setProcessing(false);
-    }
+  const apply = async () => {
+    const action = confirmAction;
+    if (!action || busy) return;
+    setConfirmAction(null);
+    const body = { action: action.key, disclosure };
+    if (action.key === "staging") body.options = { style };
+    await beginEdit(body);
   };
+
+  const applyAuto = () => beginEdit({ action: "auto" });
 
   const revert = async () => {
     if (busy) return;
