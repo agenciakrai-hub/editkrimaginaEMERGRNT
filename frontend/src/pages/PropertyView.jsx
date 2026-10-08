@@ -25,6 +25,7 @@ import {
   Film, Music, Clapperboard, Download, Smartphone, Monitor,
 } from "lucide-react";
 import { toast } from "sonner";
+import { watchBatch } from "@/lib/watchBatch";
 
 const PORTAL_PRESETS = [
   { key: "original", label: "Original (máxima calidad)" },
@@ -62,6 +63,8 @@ export default function PropertyView() {
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchAction, setBatchAction] = useState("");
   const [job, setJob] = useState(null);
+  const batchWatch = useRef(null);
+  const batchKey = `krimagina:batch:${id}`;
 
   const [videos, setVideos] = useState([]);
   const [videoOpen, setVideoOpen] = useState(false);
@@ -79,7 +82,7 @@ export default function PropertyView() {
     try {
       const [p, ph] = await Promise.all([
         api.get(`/properties/${id}`),
-        api.get(`/properties/${id}/photos`),
+        api.get(`/properties/${id}/photos`, { params: { _refresh: Date.now() } }),
       ]);
       setProp(p.data);
       setPhotos(ph.data);
@@ -209,29 +212,34 @@ export default function PropertyView() {
     }
   };
 
-  const pollJob = (jobId) => {
-    const interval = setInterval(async () => {
-      try {
-        const { data } = await api.get(`/jobs/${jobId}`);
-        setJob(data);
-        if (data.status === "done") {
-          clearInterval(interval);
-          await load();
-          await refresh();
-          if (data.error_message) {
-            toast.error(data.error_message, { duration: 12000 });
-          } else if (data.failed) {
-            toast.error(`Lote terminado · ${data.done} editadas, ${data.failed} sin completar`);
-          } else {
-            toast.success(`Lote completado · ${data.done} editadas`);
-          }
-          setTimeout(() => setJob(null), 3000);
-        }
-      } catch {
-        clearInterval(interval);
-      }
-    }, 2500);
-  };
+  const pollJob = useCallback((jobId) => {
+    batchWatch.current?.();
+    sessionStorage.setItem(batchKey, jobId);
+    batchWatch.current = watchBatch({
+      readJob: async () => (await api.get(`/jobs/${jobId}`, { params: { _refresh: Date.now() } })).data,
+      readPhotos: async () => (await api.get(`/properties/${id}/photos`, { params: { _refresh: Date.now() } })).data,
+      onJob: setJob,
+      onPhotos: setPhotos,
+      onComplete: (data) => {
+        sessionStorage.removeItem(batchKey);
+        refresh().catch(() => {});
+        if (data.error_message) toast.error(data.error_message, { duration: 12000 });
+        else if (data.failed) toast.error(`Lote terminado · ${data.done} editadas, ${data.failed} sin completar`);
+        else toast.success(`Lote completado · ${data.done} editadas`);
+        setJob(null);
+      },
+      onError: (err) => {
+        toast.error(apiError(err, "No se pudo actualizar el lote. Vuelve a abrir la propiedad para reintentarlo."));
+        setJob(null);
+      },
+    });
+  }, [id, batchKey, refresh]);
+
+  useEffect(() => {
+    const jobId = sessionStorage.getItem(batchKey);
+    if (jobId) pollJob(jobId);
+    return () => { batchWatch.current?.(); batchWatch.current = null; };
+  }, [batchKey, pollJob]);
 
   const statusBadge = (p) => {
     if (p.status === "processing")
