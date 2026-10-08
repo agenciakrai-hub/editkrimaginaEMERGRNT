@@ -537,6 +537,29 @@ async def delete_photo(photo_id: str, user: dict = Depends(current_user)):
     return {"ok": True}
 
 
+
+
+@api.get("/properties/{property_id}/deleted-photos")
+async def deleted_photos(property_id: str, user: dict = Depends(current_user)):
+    prop = await db.properties.find_one({"id": property_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+    return await db.photos.find({"property_id": property_id, "user_id": user["user_id"], "is_deleted": True}, {"_id": 0, "id": 1, "filename": 1}).to_list(1000)
+
+
+@api.post("/photos/{photo_id}/recover")
+async def recover_photo(photo_id: str, user: dict = Depends(current_user)):
+    query = {"id": photo_id, "user_id": user["user_id"], "is_deleted": True}
+    photo = await db.photos.find_one(query)
+    if not photo:
+        raise HTTPException(status_code=404, detail="Foto eliminada no encontrada")
+    prop = await db.properties.find_one({"id": photo["property_id"], "user_id": user["user_id"], "is_deleted": {"$ne": True}})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+    await db.photos.update_one(query, {"$set": {"is_deleted": False}})
+    return {"ok": True}
+
+
 @api.post("/photos/{photo_id}/undo")
 async def undo_photo(photo_id: str, user: dict = Depends(current_user)):
     query = {"id": photo_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}

@@ -52,6 +52,9 @@ export default function PropertyView() {
   const fileRef = useRef(null);
   const [prop, setProp] = useState(null);
   const [photos, setPhotos] = useState([]);
+  const [deletedPhotos, setDeletedPhotos] = useState([]);
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [recovering, setRecovering] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const selectedPhotos = photos.filter((p) => selectedIds.includes(p.id));
   const togglePhoto = (photoId) => setSelectedIds((prev) => prev.includes(photoId) ? prev.filter((v) => v !== photoId) : [...prev, photoId]);
@@ -81,12 +84,14 @@ export default function PropertyView() {
 
   const load = useCallback(async () => {
     try {
-      const [p, ph] = await Promise.all([
+      const [p, ph, deleted] = await Promise.all([
         api.get(`/properties/${id}`),
         api.get(`/properties/${id}/photos`, { params: { _refresh: Date.now() } }),
+        api.get(`/properties/${id}/deleted-photos`),
       ]);
       setProp(p.data);
       setPhotos(ph.data);
+      setDeletedPhotos(deleted.data);
     } catch (err) {
       toast.error(apiError(err));
       navigate("/app");
@@ -175,13 +180,25 @@ export default function PropertyView() {
 
   const deletePhoto = async (photoId, e) => {
     e.stopPropagation();
+    if (!window.confirm("¿Mover esta foto a la papelera? Podrás recuperarla con sus ediciones.")) return;
     try {
       await api.delete(`/photos/${photoId}`);
       setPhotos((prev) => prev.filter((p) => p.id !== photoId));
-      toast.success("Foto eliminada");
+      await load();
+      toast.success("Foto movida a la papelera");
     } catch (err) {
       toast.error(apiError(err));
     }
+  };
+
+  const recoverPhoto = async (photoId) => {
+    setRecovering(photoId);
+    try {
+      await api.post(`/photos/${photoId}/recover`);
+      await load();
+      toast.success("Foto recuperada con sus ediciones");
+    } catch (err) { toast.error(apiError(err)); }
+    finally { setRecovering(null); }
   };
 
   const selectedAction = actions.find((a) => a.key === batchAction);
@@ -318,6 +335,16 @@ export default function PropertyView() {
               data-testid="file-input" onChange={(e) => handleFiles(e.target.files)} />
           </div>
         </div>
+
+        {deletedPhotos.length > 0 && (<div className="mb-5">
+          <Button variant="outline" onClick={() => setTrashOpen(!trashOpen)} data-testid="trash-toggle">Papelera ({deletedPhotos.length})</Button>
+          {trashOpen && <div className="mt-3 space-y-2 rounded-xl border border-white/10 p-4">
+            {deletedPhotos.map((photo) => <div key={photo.id} className="flex items-center justify-between gap-3">
+              <span>{photo.filename || "Foto eliminada"}</span>
+              <Button variant="outline" disabled={!!recovering} onClick={() => recoverPhoto(photo.id)} data-testid={`recover-photo-${photo.id}`}>{recovering === photo.id ? "Recuperando…" : "Recuperar"}</Button>
+            </div>)}
+          </div>}
+        </div>)}
 
         {photos.length > 0 && (
           <div className="flex flex-wrap items-center gap-3 mb-5 rounded-xl border border-white/10 bg-white/5 p-3" data-testid="photo-selection-bar">
