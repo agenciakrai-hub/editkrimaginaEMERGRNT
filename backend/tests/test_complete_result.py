@@ -21,17 +21,11 @@ class CompleteResultTests(unittest.TestCase):
             with self.subTest(output_length=len(output)), self.assertRaises(Exception):
                 ai_edit._validate_complete_result(photo((1500, 1000)), output)
 
-    def test_invalid_primary_uses_valid_fallback(self):
-        valid = photo((750, 500))
-        model = AsyncMock(side_effect=[photo((500, 500)), valid])
-        with patch.object(ai_edit, "MODEL", "primary"), patch.object(ai_edit, "FALLBACK_MODEL", "fallback"), patch.object(ai_edit, "_call_model", model):
-            result = asyncio.run(ai_edit.run_edit(photo((1500, 1000)), "complete", {}, "test"))
-        self.assertEqual(result, valid)
-        self.assertEqual(model.await_count, 2)
 
-    def test_all_invalid_outputs_fail_without_delivering_distorted_format(self):
-        with patch.object(ai_edit, "_call_model", AsyncMock(return_value=photo((500, 500)))):
-            self.assertIsNone(asyncio.run(ai_edit.run_edit(photo((1500, 1000)), "complete", {}, "test")))
+
+    def test_direct_model_editing_is_disabled(self):
+        with self.assertRaises(RuntimeError):
+            asyncio.run(ai_edit.run_edit(photo((1500, 1000)), "complete", {}, "test"))
 
     def test_pro_prompt_is_unchanged(self):
         self.assertIn("do NOT add, remove, move or duplicate furniture or objects", ai_edit.build_prompt("auto_pro", {}))

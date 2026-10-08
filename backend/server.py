@@ -530,17 +530,20 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     src_path = photo.get("current_path") or photo["original_path"]
     data, _ = await asyncio.to_thread(storage.get_object, src_path)
 
-    # Essential/free tools are deterministic local operations. Keep them local
-    # even if stale provider overrides exist in the database; provider overrides
-    # are reserved for AI/generative photo engines.
-    # The one-click "pro" enhancement tools always use the reliable built-in
-    # Emergent (Gemini) engine and ignore provider overrides, so a broken/unavailable
-    # custom provider never blocks them.
-    override = None if action_key in BYPASS_OVERRIDE else await get_tool_override(action_key)
+    # Respect selected KRAI engines; never fall back to another AI provider.
+    override = await get_tool_override(action_key)
+    if override and not ai_providers.is_krai_gateway(override[0].get("base_url")):
+        raise ProviderEditError(provider="KRAI", model=override[1],
+            reason="La edición solo está autorizada mediante la API de KRAI. Selecciona KRAI para esta herramienta.",
+            code="krai_required")
+    if not override and action_key not in local_edit.SUPPORTED:
+        raise ProviderEditError(provider="KRAI", model="sin configurar",
+            reason="Selecciona un modelo de KRAI para esta herramienta. No se usará otro proveedor.",
+            code="krai_required")
     result_bytes = None
-    used_provider = "gemini"
-    used_model = ai_edit.MODEL
-    gemini_calls = 1
+    used_provider = "local"
+    used_model = "opencv"
+    gemini_calls = 0
     is_local = False
     if override:
         prov, model_id = override
@@ -575,13 +578,16 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
         gemini_calls = 0
         is_local = True
     if not result_bytes:
-        result_bytes = await ai_edit.run_edit(data, action_key, options, session_id=f"edit_{photo['id']}")
-        used_provider = "gemini"
-        used_model = ai_edit.MODEL
-        gemini_calls = 1
-        is_local = False
-    if not result_bytes:
-        raise RuntimeError("no_image")
+        raise ProviderEditError(provider="KRAI", model=used_model,
+            reason="El proveedor no devolvió una imagen. No se usará un motor alternativo.",
+            code="no_image")
+    if action_key == "complete":
+        try:
+            ai_edit._validate_complete_result(data, result_bytes)
+        except Exception as exc:
+            raise ProviderEditError(provider=used_provider, model=used_model,
+                reason="KRAI devolvió una imagen con formato o proporciones incompatibles. No se ha guardado la edición.",
+                code="invalid_image_geometry", status_code=502) from exc
     preserve_original = bool(override and ai_providers.is_krai_gateway(override[0].get("base_url")))
     if not is_local and not preserve_original:
         result_bytes = await asyncio.to_thread(imaging.finalize_edit, result_bytes, data)

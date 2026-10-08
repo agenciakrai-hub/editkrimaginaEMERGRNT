@@ -223,11 +223,11 @@ function ToolOverrides() {
   useEffect(() => { load(); }, []);
 
   const resetAll = async () => {
-    if (!window.confirm("¿Restablecer TODAS las herramientas al motor por defecto (Gemini Nano Banana)? Las ediciones volverán a comportarse como en vista previa.")) return;
+    if (!window.confirm("¿Quitar todas las asignaciones? Las herramientas de IA quedarán desactivadas hasta que selecciones un motor de KRAI.")) return;
     setResetting(true);
     try {
       await api.post("/admin/reset-engines");
-      toast.success("Todas las herramientas usan de nuevo Gemini Nano Banana");
+      toast.success("Asignaciones eliminadas. Selecciona un motor de KRAI para editar con IA.");
       load();
     } catch (err) { toast.error(apiError(err)); } finally { setResetting(false); }
   };
@@ -253,13 +253,13 @@ function ToolOverrides() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-sm text-slate-400">
           {activeCount > 0
-            ? `${activeCount} herramienta(s) usan un motor personalizado (no Gemini por defecto).`
-            : "Todas las herramientas usan Gemini Nano Banana por defecto."}
+            ? `${activeCount} herramienta(s) tienen un motor asignado.`
+            : "Selecciona un motor de KRAI para activar las herramientas de IA."}
         </p>
         <Button onClick={resetAll} disabled={resetting || activeCount === 0} data-testid="reset-engines-btn"
           className="rounded-full bg-white/10 hover:bg-white/20 text-white">
           {resetting ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
-          Restablecer a Gemini por defecto
+          Quitar asignaciones
         </Button>
       </div>
       <div className="rounded-2xl border border-white/5 overflow-hidden">
@@ -281,7 +281,7 @@ function ToolOverrides() {
                   <Select value={current} onValueChange={(v) => setOverride(t.action, v)}>
                     <SelectTrigger data-testid={`tool-select-${t.action}`} className="bg-secondary/60 border-white/10 max-w-xs"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-[#1E1A29] border-white/10 text-white">
-                      <SelectItem value="default">Por defecto (Gemini Nano Banana)</SelectItem>
+                      <SelectItem value="default">Sin asignación</SelectItem>
                       {photo_models.map((m) => (
                         <SelectItem key={`${m.provider_id}::${m.model_id}`} value={`${m.provider_id}::${m.model_id}`}>
                           {m.provider_name} · {m.model_name}
@@ -297,7 +297,7 @@ function ToolOverrides() {
       </table>
       {photo_models.length === 0 && (
         <p className="px-4 py-3 text-xs text-slate-500 border-t border-white/5">
-          Añade un proveedor con un modelo de <b>edición de imagen</b> (imagen → imagen, p. ej. FLUX Kontext, FLUX.2 Klein o Qwen Image Edit) para poder asignarlo a una herramienta.
+          Añade la API de KRAI y activa su modelo de <b>edición de imagen</b> para asignarlo a una herramienta.
         </p>
       )}
       </div>
@@ -321,14 +321,14 @@ export default function AdminProviders() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="font-display text-xl font-semibold text-white">Proveedores de IA</h2>
-            <p className="text-sm text-slate-400">Añade fuentes de modelos (OpenAI, OpenRouter, Nvidia, fal.ai…) y actívalos por herramienta.</p>
+            <p className="text-sm text-slate-400">Configura la API de KRAI y asigna su modelo de imagen a cada herramienta.</p>
           </div>
           <AddProviderDialog onSaved={onChanged} />
         </div>
         {providers === null ? (
           <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-cyan-400" /></div>
         ) : providers.length === 0 ? (
-          <p className="text-slate-500 text-sm">Aún no hay proveedores. La app usa Gemini Nano Banana por defecto.</p>
+          <p className="text-slate-500 text-sm">Aún no hay proveedores. Configura la API de KRAI para editar con IA.</p>
         ) : (
           <div className="grid lg:grid-cols-2 gap-4" data-testid="providers-grid">
             {providers.map((p) => <ProviderCard key={p.id} provider={p} onChanged={onChanged} />)}
@@ -338,7 +338,7 @@ export default function AdminProviders() {
 
       <section>
         <h2 className="font-display text-xl font-semibold text-white mb-1">Motor por herramienta</h2>
-        <p className="text-sm text-slate-400 mb-4">Elige qué modelo usa cada herramienta de edición. Por defecto usa Gemini Nano Banana; puedes volver al modelo por defecto cuando quieras.</p>
+        <p className="text-sm text-slate-400 mb-4">Selecciona el motor de KRAI para cada herramienta de IA. Si falla, la edición se detiene sin cambiar de proveedor.</p>
         <ToolOverrides key={tick} />
       </section>
     </div>
