@@ -28,6 +28,7 @@ import providers as ai_providers
 from admin import register_admin_routes
 import stripe
 import tempfile
+from work_heartbeat import stale_work_filter, run_with_heartbeat, batch_public
 import shutil
 
 mongo_url = os.environ['MONGO_URL']
@@ -705,6 +706,7 @@ async def start_photo_edit(photo_id: str, data: EditInput, background: Backgroun
     charge = 0 if is_owner(user) else ai_edit.ACTIONS[data.action]["cost"]
     job = {"id": job_id, "kind": "photo_edit", "photo_id": photo_id, "user_id": user["user_id"], "status": "starting", "action": data.action, "label": ai_edit.ACTIONS[data.action]["label"], "charge": charge, "total": 1, "done": 0, "failed": 0, "processed": 0, "created_at": datetime.now(timezone.utc).isoformat()}
     try:
+        job["heartbeat_at"] = datetime.now(timezone.utc).isoformat()
         await db.jobs.insert_one(job)
         if charge:
             debit = await db.users.update_one({"user_id": user["user_id"], "credits": {"$gte": charge}}, {"$inc": {"credits": -charge}, "$addToSet": {"photo_edit_charges": job_id}})
@@ -712,7 +714,7 @@ async def start_photo_edit(photo_id: str, data: EditInput, background: Backgroun
                 raise HTTPException(status_code=402, detail="Créditos insuficientes")
         await db.jobs.update_one({"id": job_id}, {"$set": {"status": "processing"}})
         photo["edit_job_id"] = job_id
-        background.add_task(_process_photo_edit, job_id, photo, data)
+        background.add_task(run_with_heartbeat, db, job_id, _process_photo_edit, job_id, photo, data)
     except Exception:
         await _refund_photo_edit(job)
         await db.jobs.update_one({"id": job_id}, {"$set": {"status": "failed", "failed": 1, "processed": 1, "error_message": "No se pudo iniciar la edición."}})
@@ -743,7 +745,7 @@ async def _process_photo_edit(job_id, photo, data):
 
 
 async def _recover_photo_edit_jobs():
-    jobs = await db.jobs.find({"kind": "photo_edit", "status": {"$in": ["starting", "processing"]}}, {"_id": 0}).to_list(1000)
+    jobs = await db.jobs.find({"kind": "photo_edit", "status": {"$in": ["starting", "processing"]}, **stale_work_filter()}, {"_id": 0}).to_list(1000)
     for job in jobs:
         photo = await db.photos.find_one({"id": job["photo_id"], "user_id": job["user_id"]}, {"_id": 0})
         saved = bool(photo and any(e.get("job_id") == job["id"] for e in photo.get("edits", [])))
@@ -1022,9 +1024,11 @@ async def batch_edit(property_id: str, data: BatchInput, user: dict = Depends(cu
         "status": "processing",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    job["heartbeat_at"] = datetime.now(timezone.utc).isoformat()
+    job["photo_ids"] = [p["id"] for p in photos]
     await db.jobs.insert_one(job)
     photo_ids = [p["id"] for p in photos]
-    asyncio.create_task(_process_batch(job["id"], user["user_id"], photo_ids, data.action, data.options, data.disclosure, unit_cost))
+    asyncio.create_task(run_with_heartbeat(db, job["id"], _process_batch, job["id"], user["user_id"], photo_ids, data.action, data.options, data.disclosure, unit_cost))
     job.pop("_id", None)
     return {"job_id": job["id"], "total": len(photos), "cost": total_cost}
 
@@ -1034,7 +1038,7 @@ async def latest_batch(property_id: str, user: dict = Depends(current_user)):
     prop = await db.properties.find_one({"id": property_id, "user_id": user["user_id"]})
     if not prop:
         raise HTTPException(status_code=404, detail="Propiedad no encontrada")
-    return await db.jobs.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0}, sort=[("created_at", -1)])
+    return batch_public(await db.jobs.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0}, sort=[("created_at", -1)]))
 
 
 @api.get("/jobs/{job_id}")
@@ -1042,8 +1046,7 @@ async def get_job(job_id: str, user: dict = Depends(current_user)):
     job = await db.jobs.find_one({"id": job_id, "user_id": user["user_id"]}, {"_id": 0})
     if not job:
         raise HTTPException(status_code=404, detail="Trabajo no encontrado")
-    return job
-
+    return batch_public(job)
 
 # ---------- Files ----------
 @api.get("/files/{path:path}")
@@ -1397,8 +1400,13 @@ async def startup():
     if orphaned_videos:
         logger.info("Recovered %s orphaned videos", len(orphaned_videos))
     await _recover_photo_edit_jobs()
-    await db.photos.update_many({"status": "processing"}, {"$set": {"status": "ready"}})
-    await db.jobs.update_many({"status": "processing"}, {"$set": {"status": "interrupted", "error_message": "El lote se interrumpió antes de completar todas las fotos. Las ediciones guardadas se conservan; revisa las pendientes antes de reintentarlas."}})
+    # A new worker must not invalidate another worker's live edits.
+    stale_batches = {"status": "processing", "kind": {"$ne": "photo_edit"}, **stale_work_filter()}
+    orphaned_batches = await db.jobs.find(stale_batches, {"_id": 0, "id": 1, "photo_ids": 1}).to_list(1000)
+    for orphan in orphaned_batches:
+        recovered = await db.jobs.update_one({"id": orphan["id"], **stale_batches}, {"$set": {"status": "interrupted", "error_message": "El lote se interrumpió antes de completar todas las fotos. Las ediciones guardadas se conservan; revisa las pendientes antes de reintentarlas."}})
+        if recovered.modified_count and orphan.get("photo_ids"):
+            await db.photos.update_many({"id": {"$in": orphan["photo_ids"]}, "status": "processing"}, {"$set": {"status": "ready"}})
 
     asyncio.create_task(_video_sweeper())
 

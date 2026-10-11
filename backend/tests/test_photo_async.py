@@ -1,3 +1,4 @@
+from work_heartbeat import run_with_heartbeat, stale_work_filter, batch_public
 import ast
 import asyncio
 import unittest
@@ -27,6 +28,7 @@ class AsyncPhotoTests(unittest.IsolatedAsyncioTestCase):
             users=SimpleNamespace(update_one=AsyncMock(return_value=SimpleNamespace(modified_count=1))))
         self.apply = AsyncMock()
         self.env = {"db":self.db, "HTTPException":HTTPException, "uuid":uuid, "datetime":datetime, "timezone":timezone, "is_owner":lambda u:False, "ai_edit":SimpleNamespace(ACTIONS={"auto_pro":{"cost":1,"label":"Pro"}}), "_apply_edit":self.apply, "logger":Mock(), "ProviderEditError":ProviderEditError}
+        self.env.update(run_with_heartbeat=run_with_heartbeat, stale_work_filter=stale_work_filter)
         exec(compile(ast.Module(body=functions,type_ignores=[]),"async_photo","exec"), self.env)
         self.data = SimpleNamespace(action="auto_pro",options={"keep":True},disclosure=False)
         self.background = Mock()

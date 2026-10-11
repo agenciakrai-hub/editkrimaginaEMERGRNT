@@ -1,3 +1,5 @@
+import asyncio
+from work_heartbeat import run_with_heartbeat, stale_work_filter, batch_public
 import ast
 import asyncio
 import unittest
@@ -19,14 +21,17 @@ class BatchSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.photos=SimpleNamespace(find=Mock(return_value=SimpleNamespace(to_list=AsyncMock(return_value=[{"id":"inside"}]))))
         self.db=SimpleNamespace(properties=SimpleNamespace(find_one=AsyncMock(return_value={"id":"property"})),photos=self.photos,jobs=SimpleNamespace(insert_one=AsyncMock()),users=SimpleNamespace(find_one=AsyncMock(),update_one=AsyncMock()))
         self.process=AsyncMock()
-        self.schedule=Mock(side_effect=lambda coro:coro.close())
+        self.tasks=[]
+        self.schedule=Mock(side_effect=lambda coro:self.tasks.append(asyncio.create_task(coro)))
         env=dict(HTTPException=HTTPException,ai_edit=ai_edit,db=self.db,is_owner=lambda u:True,uuid=uuid,datetime=datetime,timezone=timezone,asyncio=SimpleNamespace(create_task=self.schedule),_process_batch=self.process)
+        env.update(run_with_heartbeat=run_with_heartbeat, batch_public=batch_public)
         exec(compile(ast.Module(body=[fn],type_ignores=[]),"batch_selection","exec"),env)
         self.run_batch=env["batch_edit"]
     def payload(self,ids):
         return SimpleNamespace(action="complete",photo_ids=ids,options=None,disclosure=None)
     async def test_only_selected_ids_are_queried_and_scheduled(self):
         result=await self.run_batch("property",self.payload(["inside"]),{"user_id":"owner"})
+        await asyncio.gather(*self.tasks)
         query=self.photos.find.call_args.args[0]
         self.assertEqual(query["id"],{"$in":["inside"]})
         self.assertEqual(query["property_id"],"property")

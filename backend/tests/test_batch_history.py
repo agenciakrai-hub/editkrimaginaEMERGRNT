@@ -1,3 +1,4 @@
+from work_heartbeat import run_with_heartbeat, stale_work_filter, batch_public
 import ast
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ class BatchHistoryTests(unittest.IsolatedAsyncioTestCase):
         fn.args.defaults=[]
         self.db=SimpleNamespace(properties=SimpleNamespace(find_one=AsyncMock(return_value={'id':'p'})),jobs=SimpleNamespace(find_one=AsyncMock(return_value={'done':18,'failed':21,'error_message':'Provider limit','skipped':20})))
         env={'db':self.db,'HTTPException':HTTPException}
+        env.update(run_with_heartbeat=run_with_heartbeat, batch_public=batch_public)
         exec(compile(ast.Module(body=[fn],type_ignores=[]),'batch_history','exec'),env)
         self.query=env['latest_batch']
     async def test_scopes_latest_job_to_owned_property_and_keeps_failure_reason(self):
