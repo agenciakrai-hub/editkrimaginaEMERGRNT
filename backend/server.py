@@ -29,6 +29,7 @@ from admin import register_admin_routes
 import stripe
 import tempfile
 from work_heartbeat import stale_work_filter, run_with_heartbeat, batch_public
+from edit_jobs import settle_batch_photo, release_batch, recover_stale_batches, clear_failed_jobs
 import shutil
 
 mongo_url = os.environ['MONGO_URL']
@@ -568,11 +569,11 @@ async def undo_photo(photo_id: str, user: dict = Depends(current_user)):
     photo = await db.photos.find_one(query, {"_id": 0})
     if not photo:
         raise HTTPException(status_code=404, detail="Foto no encontrada")
-    if photo.get("status") == "processing":
+    if photo.get("status") in {"processing", "queued"}:
         raise HTTPException(status_code=409, detail="Espera a que termine la edición")
     state = _photo_undo_state(photo)
     # Compare-and-set: an edit completed in another tab must never be overwritten.
-    query.update({"current_path": photo.get("current_path"), "edits": photo.get("edits", []), "status": {"$ne": "processing"}})
+    query.update({"current_path": photo.get("current_path"), "edits": photo.get("edits", []), "status": {"$nin": ["processing", "queued"]}})
     result = await db.photos.update_one(query, {"$set": state})
     if not result.modified_count:
         raise HTTPException(status_code=409, detail="La foto ha cambiado. Recarga antes de deshacer.")
@@ -580,13 +581,13 @@ async def undo_photo(photo_id: str, user: dict = Depends(current_user)):
 
 
 async def _restore_photo_original(photo: dict, user_id: str):
-    if photo.get("status") == "processing":
+    if photo.get("status") in {"processing", "queued"}:
         raise HTTPException(status_code=409, detail="Espera a que termine la edición antes de restaurar")
     state = {"current_path": photo["original_path"], "edits": [], "disclosure": False, "status": "ready"}
     if not photo.get("edits") and photo.get("current_path") == photo["original_path"] and not photo.get("disclosure"):
         return False
     query = {"id": photo["id"], "user_id": user_id, "is_deleted": {"$ne": True},
-             "status": {"$ne": "processing"}, "current_path": photo.get("current_path"),
+             "status": {"$nin": ["processing", "queued"]}, "current_path": photo.get("current_path"),
              "edits": photo.get("edits", [])}
     # Preserve stored results and history; never delete original or edited files.
     archive = {"current_path": photo.get("current_path"), "edits": photo.get("edits", []),
@@ -615,7 +616,7 @@ async def restore_batch(property_id: str, user: dict = Depends(current_user)):
         raise HTTPException(status_code=404, detail="Propiedad no encontrada")
     active = await db.jobs.find_one({**owner, "status": {"$in": ["starting", "processing"]}})
     photos = await db.photos.find({**owner, "is_deleted": {"$ne": True}}, {"_id": 0}).to_list(None)
-    if active or any(p.get("status") == "processing" for p in photos):
+    if active or any(p.get("status") in {"processing", "queued"} for p in photos):
         raise HTTPException(status_code=409, detail="Espera a que terminen las ediciones de esta propiedad antes de restaurar el lote")
     restored, skipped = 0, 0
     for photo in photos:
@@ -708,14 +709,19 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
     disc = action["disclosure_default"] if disclosure is None else disclosure
     edit_entry = {"job_id": photo.get("edit_job_id"), "action": action_key, "label": action["label"], "at": datetime.now(timezone.utc).isoformat(),
                   "before_path": src_path, "before_disclosure": bool(photo.get("disclosure", False)), "disclosure": bool(disc)}
-    await db.photos.update_one(
-        {"id": photo["id"]},
+    save_query = {"id": photo["id"], "user_id": photo["user_id"], "is_deleted": {"$ne": True}}
+    if photo.get("edit_job_id"):
+        save_query.update(edit_job_id=photo["edit_job_id"], status="processing")
+    saved = await db.photos.update_one(
+        save_query,
         {
             "$set": {"current_path": stored["path"], "status": "ready",
                      "disclosure": bool(photo.get("disclosure", False) or disc)},
             "$push": {"edits": edit_entry},
         },
     )
+    if not saved.modified_count:
+        raise ProviderEditError(provider=used_provider, model=used_model, reason="La edición fue cancelada o la foto cambió. No se ha sobrescrito su resultado.", code="edit_cancelled", status_code=409)
     await log_usage(photo["user_id"], "photo", action_key, action["cost"], gemini_calls, used_provider, used_model, ai_calls=ai_calls)
     return await db.photos.find_one({"id": photo["id"]}, {"_id": 0})
 
@@ -730,17 +736,17 @@ async def start_photo_edit(photo_id: str, data: EditInput, background: Backgroun
     photo = await db.photos.find_one(query, {"_id": 0})
     if not photo:
         raise HTTPException(status_code=404, detail="Foto no encontrada")
-    if photo.get("status") == "processing":
+    if photo.get("status") in {"processing", "queued"}:
         active = await db.jobs.find_one({"id": photo.get("edit_job_id"), "user_id": user["user_id"], "kind": "photo_edit", "status": {"$in": ["starting", "processing"]}}, {"_id": 0})
         if active:
             return {"job_id": active["id"], "status": active["status"]}
         raise HTTPException(status_code=409, detail="Esta foto ya se está editando. Espera a que termine antes de aplicar otra herramienta.")
     job_id = str(uuid.uuid4())
-    locked = await db.photos.update_one({**query, "status": {"$ne": "processing"}}, {"$set": {"status": "processing", "edit_job_id": job_id}})
+    locked = await db.photos.update_one({**query, "status": {"$nin": ["processing", "queued"]}}, {"$set": {"status": "processing", "edit_job_id": job_id}})
     if not locked.modified_count:
         raise HTTPException(status_code=409, detail="Esta foto ya se está editando. Vuelve a abrirla para ver el progreso.")
     charge = 0 if is_owner(user) else ai_edit.ACTIONS[data.action]["cost"]
-    job = {"id": job_id, "kind": "photo_edit", "photo_id": photo_id, "user_id": user["user_id"], "status": "starting", "action": data.action, "label": ai_edit.ACTIONS[data.action]["label"], "charge": charge, "total": 1, "done": 0, "failed": 0, "processed": 0, "created_at": datetime.now(timezone.utc).isoformat()}
+    job = {"id": job_id, "kind": "photo_edit", "photo_id": photo_id, "property_id": photo["property_id"], "user_id": user["user_id"], "status": "starting", "action": data.action, "label": ai_edit.ACTIONS[data.action]["label"], "charge": charge, "total": 1, "done": 0, "failed": 0, "processed": 0, "created_at": datetime.now(timezone.utc).isoformat()}
     try:
         job["heartbeat_at"] = datetime.now(timezone.utc).isoformat()
         await db.jobs.insert_one(job)
@@ -780,9 +786,15 @@ async def _process_photo_edit(job_id, photo, data):
         await db.photos.update_one({"id": photo["id"], "edit_job_id": job_id}, {"$set": {"status": "ready", "edit_job_id": None}})
 
 
-async def _recover_photo_edit_jobs():
-    jobs = await db.jobs.find({"kind": "photo_edit", "status": {"$in": ["starting", "processing"]}, **stale_work_filter()}, {"_id": 0}).to_list(1000)
+async def _recover_photo_edit_jobs(owner=None):
+    query = {"kind": "photo_edit", "status": {"$in": ["starting", "processing"]}, **stale_work_filter()}
+    if owner:
+        query.update(owner)
+    jobs = await db.jobs.find(query, {"_id": 0}).to_list(1000)
     for job in jobs:
+        claimed = await db.jobs.update_one({**query, "id": job["id"]}, {"$set": {"status": "interrupted"}})
+        if not claimed.modified_count:
+            continue
         photo = await db.photos.find_one({"id": job["photo_id"], "user_id": job["user_id"]}, {"_id": 0})
         saved = bool(photo and any(e.get("job_id") == job["id"] for e in photo.get("edits", [])))
         if saved:
@@ -801,14 +813,18 @@ async def edit_photo(photo_id: str, data: EditInput, user: dict = Depends(curren
     if not photo:
         raise HTTPException(status_code=404, detail="Foto no encontrada")
 
+    lock_id = str(uuid.uuid4())
+    locked = await db.photos.update_one({"id": photo_id, "user_id": user["user_id"], "status": {"$nin": ["processing", "queued"]}}, {"$set": {"status": "processing", "edit_job_id": lock_id}})
+    if not locked.modified_count:
+        raise HTTPException(status_code=409, detail="Esta foto ya está reservada por otra edición.")
+    photo["edit_job_id"] = lock_id
     cost = ai_edit.ACTIONS[data.action]["cost"]
     charge = 0 if is_owner(user) else cost
     if charge > 0:
-        fresh = await db.users.find_one({"user_id": user["user_id"]})
-        if fresh.get("credits", 0) < charge:
+        debit = await db.users.update_one({"user_id": user["user_id"], "credits": {"$gte": charge}}, {"$inc": {"credits": -charge}})
+        if not debit.modified_count:
+            await db.photos.update_one({"id": photo_id, "edit_job_id": lock_id}, {"$set": {"status": "ready", "edit_job_id": None}})
             raise HTTPException(status_code=402, detail="Créditos insuficientes")
-        await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": -charge}})
-    await db.photos.update_one({"id": photo_id}, {"$set": {"status": "processing"}})
     try:
         updated = await _apply_edit(photo, data.action, data.options, data.disclosure)
     except ProviderEditError as e:
@@ -818,13 +834,13 @@ async def edit_photo(photo_id: str, data: EditInput, user: dict = Depends(curren
         )
         if charge > 0:
             await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": charge}})
-        await db.photos.update_one({"id": photo_id}, {"$set": {"status": "ready"}})
+        await db.photos.update_one({"id": photo_id, "edit_job_id": lock_id}, {"$set": {"status": "ready", "edit_job_id": None}})
         raise HTTPException(status_code=e.status_code, detail=e.reason)
     except Exception:
         logger.exception("edit failed")
         if charge > 0:
             await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": charge}})
-        await db.photos.update_one({"id": photo_id}, {"$set": {"status": "ready"}})
+        await db.photos.update_one({"id": photo_id, "edit_job_id": lock_id}, {"$set": {"status": "ready", "edit_job_id": None}})
         raise HTTPException(status_code=500, detail="La edición falló. Tus créditos han sido reembolsados.")
 
     newbal = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
@@ -986,36 +1002,43 @@ async def inpaint_photo(photo_id: str, request: Request, user: dict = Depends(cu
 
 # ---------- Batch jobs ----------
 async def _process_batch(job_id: str, user_id: str, photo_ids: List[str], action_key: str, options: dict, disclosure, unit_cost: int):
-    for item_index, pid in enumerate(photo_ids):
-        photo = await db.photos.find_one({"id": pid, "user_id": user_id, "is_deleted": {"$ne": True}}, {"_id": 0})
-        if not photo:
-            await db.jobs.update_one({"id": job_id}, {"$inc": {"failed": 1, "processed": 1}})
-            continue
-        await db.photos.update_one({"id": pid}, {"$set": {"status": "processing"}})
-        try:
-            await _apply_edit(photo, action_key, options, disclosure)
-            await db.jobs.update_one({"id": job_id}, {"$inc": {"done": 1, "processed": 1}})
-        except ProviderEditError as e:
-            await db.photos.update_one({"id": pid}, {"$set": {"status": "ready"}})
-            remaining = len(photo_ids) - item_index - 1 if e.code == "rate_limited" else 0
-            refund_count = 1 + remaining
-            if unit_cost > 0:
-                await db.users.update_one({"user_id": user_id}, {"$inc": {"credits": unit_cost * refund_count}})
-            await db.jobs.update_one({"id": job_id}, {
-                "$inc": {"failed": refund_count, "processed": refund_count},
-                "$set": {"error_code": e.code, "error_message": e.reason, "skipped": remaining},
-                "$addToSet": {"failed_photo_ids": pid},
-            })
-            if remaining:
+    job = await db.jobs.find_one({"id": job_id, "user_id": user_id}, {"_id": 0})
+    finished = False
+    try:
+        for pid in photo_ids:
+            current = await db.jobs.find_one({"id": job_id, "status": "processing"}, {"_id": 0})
+            if not current:
                 break
-        except Exception:
-            logger.exception("batch item failed %s", pid)
-            await db.jobs.update_one({"id": job_id}, {"$set": {"error_code": "batch_item_failed", "error_message": "No se pudo editar la foto " + str(photo.get("filename") or photo.get("name") or pid) + ". Se conservó su imagen anterior."}, "$addToSet": {"failed_photo_ids": pid}})
-            if unit_cost > 0:
-                await db.users.update_one({"user_id": user_id}, {"$inc": {"credits": unit_cost}})
-            await db.photos.update_one({"id": pid}, {"$set": {"status": "ready"}})
-            await db.jobs.update_one({"id": job_id}, {"$inc": {"failed": 1, "processed": 1}})
-    await db.jobs.update_one({"id": job_id}, {"$set": {"status": "done", "finished_at": datetime.now(timezone.utc).isoformat()}})
+            photo = await db.photos.find_one({"id": pid, "user_id": user_id, "edit_job_id": job_id, "is_deleted": {"$ne": True}}, {"_id": 0})
+            locked = await db.photos.update_one({"id": pid, "user_id": user_id, "edit_job_id": job_id, "status": "queued"}, {"$set": {"status": "processing"}}) if photo else None
+            if not photo or not locked.modified_count:
+                await settle_batch_photo(db, job, pid, refund=True)
+                await db.jobs.update_one({"id": job_id, "status": "processing"}, {"$inc": {"failed": 1, "processed": 1}, "$addToSet": {"failed_photo_ids": pid}})
+                continue
+            try:
+                await db.jobs.update_one({"id": job_id}, {"$set": {"current_photo_id": pid}})
+                await _apply_edit(photo, action_key, options, disclosure)
+                await settle_batch_photo(db, job, pid)
+                await db.jobs.update_one({"id": job_id, "status": "processing"}, {"$inc": {"done": 1, "processed": 1}})
+            except Exception as exc:
+                logger.exception("batch item failed %s", pid)
+                code = exc.code if isinstance(exc, ProviderEditError) else "batch_item_failed"
+                message = exc.reason if isinstance(exc, ProviderEditError) else "No se pudo editar esta foto. Se conservó su imagen anterior."
+                await settle_batch_photo(db, job, pid, refund=True)
+                await db.jobs.update_one({"id": job_id, "status": "processing"}, {"$inc": {"failed": 1, "processed": 1}, "$set": {"error_code": code, "error_message": message}, "$addToSet": {"failed_photo_ids": pid}})
+                # Stop sending more photographs into an unhealthy provider.
+                if code in {"rate_limited", "provider_timeout", "provider_unavailable", "provider_busy", "provider_auth"}:
+                    break
+            finally:
+                await db.photos.update_one({"id": pid, "user_id": user_id, "edit_job_id": job_id}, {"$set": {"status": "ready", "edit_job_id": None}})
+        current = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+        pending = max(0, current["total"] - current.get("processed", 0))
+        await db.jobs.update_one({"id": job_id, "status": "processing"}, {"$set": {"status": "interrupted" if pending else "done", "pending": pending, "finished_at": datetime.now(timezone.utc).isoformat(), "current_photo_id": None}})
+        finished = True
+    finally:
+        if not finished:
+            await db.jobs.update_one({"id": job_id, "status": "processing"}, {"$set": {"status": "interrupted", "error_message": "El proceso se interrumpió. Las fotos pendientes quedan libres y se conservan las ediciones guardadas."}})
+        await release_batch(db, job)
 
 
 @api.post("/properties/{property_id}/batch")
@@ -1037,36 +1060,43 @@ async def batch_edit(property_id: str, data: BatchInput, user: dict = Depends(cu
 
     if data.photo_ids is not None and len(photos) != len(set(data.photo_ids)):
         raise HTTPException(status_code=400, detail="La selección contiene fotos no disponibles en esta propiedad")
-    if any(p.get("status") == "processing" for p in photos):
+    if any(p.get("status") in {"processing", "queued"} for p in photos):
         raise HTTPException(status_code=409, detail="Hay fotos seleccionadas que ya se están procesando")
     unit_cost = 0 if is_owner(user) else ai_edit.ACTIONS[data.action]["cost"]
     total_cost = unit_cost * len(photos)
-    if total_cost > 0:
-        fresh = await db.users.find_one({"user_id": user["user_id"]})
-        if fresh.get("credits", 0) < total_cost:
-            raise HTTPException(status_code=402, detail=f"Necesitas {total_cost} créditos para este lote")
-        await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"credits": -total_cost}})
-
-    job = {
-        "id": str(uuid.uuid4()),
-        "user_id": user["user_id"],
-        "property_id": property_id,
-        "action": data.action,
-        "label": ai_edit.ACTIONS[data.action]["label"],
-        "total": len(photos),
-        "processed": 0,
-        "done": 0,
-        "failed": 0,
-        "status": "processing",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    job["heartbeat_at"] = datetime.now(timezone.utc).isoformat()
-    job["photo_ids"] = [p["id"] for p in photos]
-    await db.jobs.insert_one(job)
+    job_id = str(uuid.uuid4())
     photo_ids = [p["id"] for p in photos]
-    asyncio.create_task(run_with_heartbeat(db, job["id"], _process_batch, job["id"], user["user_id"], photo_ids, data.action, data.options, data.disclosure, unit_cost))
-    job.pop("_id", None)
-    return {"job_id": job["id"], "total": len(photos), "cost": total_cost}
+    job = {"id": job_id, "kind": "batch_edit", "user_id": user["user_id"], "property_id": property_id,
+           "action": data.action, "label": ai_edit.ACTIONS[data.action]["label"], "total": len(photos),
+           "processed": 0, "done": 0, "failed": 0, "status": "starting", "unit_cost": unit_cost,
+           "created_at": datetime.now(timezone.utc).isoformat(), "heartbeat_at": datetime.now(timezone.utc).isoformat(), "photo_ids": photo_ids}
+    try:
+        await db.jobs.insert_one(job)
+        for photo in photos:
+            locked = await db.photos.update_one({"id": photo["id"], "user_id": user["user_id"], "is_deleted": {"$ne": True}, "status": {"$nin": ["processing", "queued"]}}, {"$set": {"status": "queued", "edit_job_id": job_id}})
+            if not locked.modified_count:
+                raise HTTPException(status_code=409, detail="Otra edición ha reservado una foto. No se ha iniciado este lote.")
+        if total_cost:
+            debit = await db.users.update_one({"user_id": user["user_id"], "credits": {"$gte": total_cost}}, {"$inc": {"credits": -total_cost}, "$addToSet": {"batch_edit_charges": {"$each": [f"{job_id}:{pid}" for pid in photo_ids]}}})
+            if not debit.modified_count:
+                raise HTTPException(status_code=402, detail=f"Necesitas {total_cost} créditos para este lote")
+        await db.jobs.update_one({"id": job_id}, {"$set": {"status": "processing"}})
+        asyncio.create_task(run_with_heartbeat(db, job_id, _process_batch, job_id, user["user_id"], photo_ids, data.action, data.options, data.disclosure, unit_cost))
+    except Exception:
+        await release_batch(db, job)
+        await db.jobs.update_one({"id": job_id}, {"$set": {"status": "failed", "error_message": "No se pudo iniciar el lote. No hay fotos reservadas por este intento."}})
+        raise
+    return {"job_id": job_id, "total": len(photos), "cost": total_cost}
+
+
+@api.post("/properties/{property_id}/clear-failed-processes")
+async def clear_property_failed_processes(property_id: str, user: dict = Depends(current_user)):
+    owner = {"property_id": property_id, "user_id": user["user_id"]}
+    if not await db.properties.find_one({"id": property_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}):
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+    await _recover_photo_edit_jobs(owner)
+    cleared = await clear_failed_jobs(db, owner)
+    return {"cleared": cleared, "message": "Procesos fallidos limpiados. Las fotos y sus ediciones se conservan."}
 
 
 @api.get("/properties/{property_id}/latest-batch")
@@ -1074,7 +1104,7 @@ async def latest_batch(property_id: str, user: dict = Depends(current_user)):
     prop = await db.properties.find_one({"id": property_id, "user_id": user["user_id"]})
     if not prop:
         raise HTTPException(status_code=404, detail="Propiedad no encontrada")
-    return batch_public(await db.jobs.find_one({"property_id": property_id, "user_id": user["user_id"]}, {"_id": 0}, sort=[("created_at", -1)]))
+    return batch_public(await db.jobs.find_one({"property_id": property_id, "user_id": user["user_id"], "kind": {"$ne": "photo_edit"}, "errors_cleared_at": {"$exists": False}}, {"_id": 0}, sort=[("created_at", -1)]))
 
 
 @api.get("/jobs/{job_id}")
@@ -1437,12 +1467,7 @@ async def startup():
         logger.info("Recovered %s orphaned videos", len(orphaned_videos))
     await _recover_photo_edit_jobs()
     # A new worker must not invalidate another worker's live edits.
-    stale_batches = {"status": "processing", "kind": {"$ne": "photo_edit"}, **stale_work_filter()}
-    orphaned_batches = await db.jobs.find(stale_batches, {"_id": 0, "id": 1, "photo_ids": 1}).to_list(1000)
-    for orphan in orphaned_batches:
-        recovered = await db.jobs.update_one({"id": orphan["id"], **stale_batches}, {"$set": {"status": "interrupted", "error_message": "El lote se interrumpió antes de completar todas las fotos. Las ediciones guardadas se conservan; revisa las pendientes antes de reintentarlas."}})
-        if recovered.modified_count and orphan.get("photo_ids"):
-            await db.photos.update_many({"id": {"$in": orphan["photo_ids"]}, "status": "processing"}, {"$set": {"status": "ready"}})
+    await recover_stale_batches(db)
 
     asyncio.create_task(_video_sweeper())
 

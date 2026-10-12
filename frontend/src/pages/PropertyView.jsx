@@ -63,10 +63,12 @@ export default function PropertyView() {
   const [uploading, setUploading] = useState(false);
   const [actions, setActions] = useState([]);
 
+  const [clearFailedOpen, setClearFailedOpen] = useState(false);
+  const [clearingFailed, setClearingFailed] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const editedCount = photos.filter((p) => p.edits?.length || p.current_path !== p.original_path).length;
-  const photosProcessing = photos.some((p) => p.status === "processing");
+  const photosProcessing = photos.some((p) => ["processing", "queued"].includes(p.status));
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchAction, setBatchAction] = useState("");
   const [job, setJob] = useState(null);
@@ -225,6 +227,25 @@ export default function PropertyView() {
     }
   };
 
+  const clearFailedProcesses = async () => {
+    if (clearingFailed) return;
+    setClearingFailed(true);
+    try {
+      const { data } = await api.post(`/properties/${id}/clear-failed-processes`);
+      toast.success(`${data.cleared} procesos fallidos limpiados. Tus fotos se conservan.`);
+      setClearFailedOpen(false);
+      if (!job) {
+        batchWatch.current?.();
+        sessionStorage.removeItem(batchKey);
+        const latest = await api.get(`/properties/${id}/latest-batch`);
+        setLastBatch(latest.data);
+      }
+      await load();
+      await refresh();
+    } catch (err) { toast.error(apiError(err)); }
+    finally { setClearingFailed(false); }
+  };
+
   const startBatch = async () => {
     if (!selectedPhotos.length || job) return;
     try {
@@ -289,7 +310,7 @@ export default function PropertyView() {
   }, [id, batchKey, pollJob]);
 
   const statusBadge = (p) => {
-    if (p.status === "processing")
+    if (["processing", "queued"].includes(p.status))
       return <Badge className="bg-violet-500/20 text-violet-300 border-violet-500/30"><Loader2 className="w-3 h-3 mr-1 animate-spin" />Procesando</Badge>;
     if (p.edits?.length)
       return <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/30"><CheckCircle2 className="w-3 h-3 mr-1" />Editada</Badge>;
@@ -324,6 +345,9 @@ export default function PropertyView() {
             <Button onClick={() => setRestoreOpen(true)} disabled={!editedCount || !!job || photosProcessing || restoring || uploading} data-testid="restore-batch-btn"
               variant="outline" className="rounded-full border-white/15 bg-white/5 hover:bg-white/10 text-white">
               {restoring ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <RotateCcw className="w-4 h-4 mr-1.5" />} Restaurar el lote
+            </Button>
+            <Button variant="outline" onClick={() => setClearFailedOpen(true)} disabled={clearingFailed || restoring || uploading} data-testid="clear-failed-processes-btn" className="rounded-full border-amber-400/30 text-amber-200">
+              <Trash2 className="w-4 h-4 mr-2" /> Limpiar procesos fallidos
             </Button>
             <Button onClick={() => setVideoOpen(true)} disabled={!photos.length} data-testid="video-btn"
               variant="outline" className="rounded-full border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200">
@@ -429,7 +453,7 @@ export default function PropertyView() {
                 </div>
                 <div className="absolute top-2 left-2">{statusBadge(p)}</div>
                 <label className="absolute bottom-2 right-2 z-10 flex items-center gap-1.5 rounded-full bg-black/80 px-2.5 py-1.5 text-xs text-white cursor-pointer" onClick={(e) => e.stopPropagation()}>
-                  <input type="checkbox" checked={selectedIds.includes(p.id)} disabled={!!job || p.status === "processing"} onChange={() => togglePhoto(p.id)} aria-label={`Seleccionar foto ${i + 1}`} data-testid={`select-photo-${p.id}`} /> Seleccionar
+                  <input type="checkbox" checked={selectedIds.includes(p.id)} disabled={!!job || ["processing", "queued"].includes(p.status)} onChange={() => togglePhoto(p.id)} aria-label={`Seleccionar foto ${i + 1}`} data-testid={`select-photo-${p.id}`} /> Seleccionar
                 </label>
                 {p.disclosure && (
                   <div className="absolute bottom-2 left-2 right-2">
@@ -490,6 +514,21 @@ export default function PropertyView() {
           </div>
         )}
       </main>
+
+      <Dialog open={clearFailedOpen} onOpenChange={(open) => !clearingFailed && setClearFailedOpen(open)}>
+        <DialogContent className="bg-[#1E1A29] border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle>Limpiar procesos fallidos</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Se retirarán los avisos de trabajos fallidos y se liberarán sus fotos. Los procesos sin actividad durante más de 20 minutos se recuperarán. No se cancelan las ediciones activas ni se borran fotografías, originales o resultados guardados. No consume créditos.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={clearingFailed} onClick={() => setClearFailedOpen(false)}>Cancelar</Button>
+            <Button disabled={clearingFailed} onClick={clearFailedProcesses} data-testid="confirm-clear-failed-processes">{clearingFailed ? "Limpiando…" : "Limpiar procesos fallidos"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={restoreOpen} onOpenChange={(open) => !restoring && setRestoreOpen(open)}>
         <DialogContent className="bg-[#1E1A29] border-white/10 text-white">

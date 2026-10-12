@@ -344,6 +344,8 @@ def _check_edit_response(response):
             code = error.lower()
     except (ValueError, TypeError):
         pass
+    if status == 409:
+        raise ProviderRequestError("provider_busy", 409, "El proveedor está ocupado. Espera a que termine la edición en curso.")
     if status == 422:
         raise ProviderRequestError("provider_contract", 503,
             "KRAI rechazó los parámetros de edición (HTTP 422). Revisa la configuración del motor.")
@@ -366,16 +368,24 @@ def _krai_edit(base_url, api_key, model_id, image_bytes, prompt):
     if not image_bytes or len(image_bytes) > 8 * 1024 * 1024:
         raise RuntimeError("La fotografía debe ocupar como máximo 8 MiB.")
     mime = image_mime(image_bytes)
-    try:
-        response = requests.post(base_url + "/execute",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={"task": "image_edit", "engine_hint": model_id,
-                  "input": {"prompt": prompt, "image_b64": base64.b64encode(image_bytes).decode("ascii"),
-                            "image_mime_type": mime},
-                  "options": {"timeout_ms": 90000}, "client_request_id": str(uuid.uuid4())},
-            timeout=(10, 105))
-    except requests.Timeout as exc:
-        raise ProviderRequestError("provider_timeout", 504, "Tiempo de edición agotado. Comprueba el estado antes de repetir.") from exc
+    # A 409 means KRAI has not submitted this image to the provider.
+    # Wait briefly for its occupied slot; never repeat a timed-out generation.
+    import time
+    request_id = str(uuid.uuid4())
+    for attempt in range(7):
+        try:
+            response = requests.post(base_url + "/execute",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"task": "image_edit", "engine_hint": model_id,
+                      "input": {"prompt": prompt, "image_b64": base64.b64encode(image_bytes).decode("ascii"),
+                                "image_mime_type": mime},
+                      "options": {"timeout_ms": 110000}, "client_request_id": request_id},
+                timeout=(10, 119))
+        except requests.Timeout as exc:
+            raise ProviderRequestError("provider_timeout", 504, "Tiempo de edición agotado. Comprueba el estado antes de repetir.") from exc
+        if response.status_code != 409 or attempt == 6:
+            break
+        time.sleep(5)
     _check_edit_response(response)
     try:
         payload = response.json()

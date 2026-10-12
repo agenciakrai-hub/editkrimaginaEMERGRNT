@@ -12,6 +12,7 @@ def matches(row, query):
         if isinstance(value, dict):
             if '$ne' in value and actual == value['$ne']: return False
             if '$in' in value and actual not in value['$in']: return False
+            if '$nin' in value and actual in value['$nin']: return False
         elif actual != value: return False
     return True
 
@@ -66,6 +67,10 @@ class RestoreTests(unittest.IsolatedAsyncioTestCase):
         p=photo();p['status']='processing';db=self.setup_db([photo('b'),p])
         with self.assertRaises(HTTPException): await self.run_restore()
         self.assertEqual(db.photos.rows[0]['current_path'],'edit/b')
+    async def test_queued_photo_blocks_restore(self):
+        self.setup_db([photo(status='queued')])
+        with self.assertRaises(HTTPException) as e: await self.run_restore()
+        self.assertEqual(e.exception.status_code,409)
     async def test_new_edit_race_is_not_overwritten(self):
         db=self.setup_db([photo()]);db.photos.race=True
         self.assertEqual(await self.run_restore(),{'restored':0,'skipped':1,'total':1})
