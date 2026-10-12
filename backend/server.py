@@ -1094,6 +1094,8 @@ async def clear_property_failed_processes(property_id: str, user: dict = Depends
     owner = {"property_id": property_id, "user_id": user["user_id"]}
     if not await db.properties.find_one({"id": property_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}):
         raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+    photos = await db.photos.find(owner, {"_id": 0, "id": 1}).to_list(None)
+    await db.jobs.update_many({"user_id": user["user_id"], "kind": "photo_edit", "photo_id": {"$in": [p["id"] for p in photos]}, "property_id": {"$exists": False}}, {"$set": {"property_id": property_id}})
     await _recover_photo_edit_jobs(owner)
     cleared = await clear_failed_jobs(db, owner)
     return {"cleared": cleared, "message": "Procesos fallidos limpiados. Las fotos y sus ediciones se conservan."}
