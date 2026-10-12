@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
 import {
   Upload, Loader2, ChevronRight, Trash2, Wand2, Zap, ImageOff, Layers, ShieldCheck, CheckCircle2,
-  Film, Music, Clapperboard, Download, Smartphone, Monitor,
+  Film, Music, Clapperboard, Download, Smartphone, Monitor, RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { watchBatch } from "@/lib/watchBatch";
@@ -63,6 +63,10 @@ export default function PropertyView() {
   const [uploading, setUploading] = useState(false);
   const [actions, setActions] = useState([]);
 
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const editedCount = photos.filter((p) => p.edits?.length || p.current_path !== p.original_path).length;
+  const photosProcessing = photos.some((p) => p.status === "processing");
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchAction, setBatchAction] = useState("");
   const [job, setJob] = useState(null);
@@ -204,6 +208,23 @@ export default function PropertyView() {
   const selectedAction = actions.find((a) => a.key === batchAction);
   const batchCost = selectedAction ? selectedAction.cost * selectedPhotos.length : 0;
 
+  const restoreBatch = async () => {
+    if (restoring || job || photosProcessing) return;
+    setRestoring(true);
+    try {
+      const { data } = await api.post(`/properties/${id}/restore-batch`);
+      setRestoreOpen(false);
+      setSelectedIds([]);
+      if (data.skipped) toast.warning(`${data.restored} fotos restauradas; ${data.skipped} cambiaron durante la operación. Revisa esas fotos antes de reintentar.`);
+      else toast.success(`${data.restored} fotos restauradas a su original`);
+    } catch (err) {
+      toast.error(apiError(err));
+    } finally {
+      await load();
+      setRestoring(false);
+    }
+  };
+
   const startBatch = async () => {
     if (!selectedPhotos.length || job) return;
     try {
@@ -292,13 +313,17 @@ export default function PropertyView() {
             {prop?.address && <p className="text-slate-400 mt-1">{prop.address}</p>}
           </div>
           <div className="flex gap-3 flex-wrap">
-            <Button onClick={applyAutoAll} disabled={!selectedPhotos.length || !!job} data-testid="auto-all-btn"
+            <Button onClick={applyAutoAll} disabled={!selectedPhotos.length || !!job || restoring} data-testid="auto-all-btn"
               className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
               <Wand2 className="w-4 h-4 mr-1.5" /> Mejorar seleccionadas <span className="ml-1.5 text-[10px] font-bold text-emerald-200">GRATIS</span>
             </Button>
-            <Button onClick={() => setBatchOpen(true)} disabled={!selectedPhotos.length || !!job} data-testid="batch-edit-btn"
+            <Button onClick={() => setBatchOpen(true)} disabled={!selectedPhotos.length || !!job || restoring} data-testid="batch-edit-btn"
               variant="outline" className="rounded-full border-white/15 bg-white/5 hover:bg-white/10 text-white">
               <Layers className="w-4 h-4 mr-1.5" /> Editar por lote
+            </Button>
+            <Button onClick={() => setRestoreOpen(true)} disabled={!editedCount || !!job || photosProcessing || restoring || uploading} data-testid="restore-batch-btn"
+              variant="outline" className="rounded-full border-white/15 bg-white/5 hover:bg-white/10 text-white">
+              {restoring ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <RotateCcw className="w-4 h-4 mr-1.5" />} Restaurar el lote
             </Button>
             <Button onClick={() => setVideoOpen(true)} disabled={!photos.length} data-testid="video-btn"
               variant="outline" className="rounded-full border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200">
@@ -326,7 +351,7 @@ export default function PropertyView() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button onClick={() => fileRef.current?.click()} disabled={uploading} data-testid="upload-btn"
+            <Button onClick={() => fileRef.current?.click()} disabled={uploading || restoring} data-testid="upload-btn"
               className="rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:brightness-110 text-white font-semibold transition-[filter]">
               {uploading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Upload className="w-4 h-4 mr-1.5" />}
               Subir fotos
@@ -466,6 +491,23 @@ export default function PropertyView() {
         )}
       </main>
 
+      <Dialog open={restoreOpen} onOpenChange={(open) => !restoring && setRestoreOpen(open)}>
+        <DialogContent className="bg-[#1E1A29] border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle>Restaurar el lote</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Se devolverán las {editedCount} fotos editadas de esta propiedad a sus originales, incluidas las que no están seleccionadas. Las fotos originales y los archivos de las ediciones se conservan. Esta acción no consume créditos.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={restoring} onClick={() => setRestoreOpen(false)}>Cancelar</Button>
+            <Button disabled={restoring || !!job || photosProcessing || !editedCount} onClick={restoreBatch} data-testid="confirm-restore-batch">
+              {restoring ? "Restaurando…" : "Restaurar todas a su original"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Batch dialog */}
       <Dialog open={batchOpen} onOpenChange={setBatchOpen}>
         <DialogContent className="bg-[#1E1A29] border-white/10 text-white">
@@ -514,3 +556,4 @@ export default function PropertyView() {
     </div>
   );
 }
+

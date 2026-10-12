@@ -579,17 +579,53 @@ async def undo_photo(photo_id: str, user: dict = Depends(current_user)):
     return _photo_public({**photo, **state})
 
 
+async def _restore_photo_original(photo: dict, user_id: str):
+    if photo.get("status") == "processing":
+        raise HTTPException(status_code=409, detail="Espera a que termine la edición antes de restaurar")
+    state = {"current_path": photo["original_path"], "edits": [], "disclosure": False, "status": "ready"}
+    if not photo.get("edits") and photo.get("current_path") == photo["original_path"] and not photo.get("disclosure"):
+        return False
+    query = {"id": photo["id"], "user_id": user_id, "is_deleted": {"$ne": True},
+             "status": {"$ne": "processing"}, "current_path": photo.get("current_path"),
+             "edits": photo.get("edits", [])}
+    # Preserve stored results and history; never delete original or edited files.
+    archive = {"current_path": photo.get("current_path"), "edits": photo.get("edits", []),
+               "disclosure": photo.get("disclosure", False), "at": datetime.now(timezone.utc).isoformat()}
+    result = await db.photos.update_one(query, {"$set": state, "$push": {"restore_archive": archive}})
+    if not result.modified_count:
+        raise HTTPException(status_code=409, detail="La foto ha cambiado. Recarga antes de restaurarla.")
+    return True
+
+
 @api.post("/photos/{photo_id}/revert")
 async def revert_photo(photo_id: str, user: dict = Depends(current_user)):
-    p = await db.photos.find_one({"id": photo_id, "user_id": user["user_id"]}, {"_id": 0})
-    if not p:
+    query = {"id": photo_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}}
+    photo = await db.photos.find_one(query, {"_id": 0})
+    if not photo:
         raise HTTPException(status_code=404, detail="Foto no encontrada")
-    await db.photos.update_one(
-        {"id": photo_id},
-        {"$set": {"current_path": p["original_path"], "edits": [], "disclosure": False, "status": "ready"}},
-    )
-    p = await db.photos.find_one({"id": photo_id}, {"_id": 0})
-    return _photo_public(p)
+    await _restore_photo_original(photo, user["user_id"])
+    return _photo_public(await db.photos.find_one(query, {"_id": 0}))
+
+
+@api.post("/properties/{property_id}/restore-batch")
+async def restore_batch(property_id: str, user: dict = Depends(current_user)):
+    owner = {"property_id": property_id, "user_id": user["user_id"]}
+    prop = await db.properties.find_one({"id": property_id, "user_id": user["user_id"], "is_deleted": {"$ne": True}})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+    active = await db.jobs.find_one({**owner, "status": {"$in": ["starting", "processing"]}})
+    photos = await db.photos.find({**owner, "is_deleted": {"$ne": True}}, {"_id": 0}).to_list(None)
+    if active or any(p.get("status") == "processing" for p in photos):
+        raise HTTPException(status_code=409, detail="Espera a que terminen las ediciones de esta propiedad antes de restaurar el lote")
+    restored, skipped = 0, 0
+    for photo in photos:
+        try:
+            restored += int(await _restore_photo_original(photo, user["user_id"]))
+        except HTTPException as exc:
+            if exc.status_code != 409:
+                raise
+            skipped += 1
+    return {"restored": restored, "skipped": skipped, "total": len(photos)}
 
 
 async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: Optional[bool]):
@@ -1438,3 +1474,4 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     client.close()
+
