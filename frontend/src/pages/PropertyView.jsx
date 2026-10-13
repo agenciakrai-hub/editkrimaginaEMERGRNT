@@ -490,7 +490,7 @@ export default function PropertyView() {
                       <VideoTimer createdAt={v.created_at} etaSeconds={v.eta_seconds || 40} />
                     </div>
                   ) : v.status === "failed" ? (
-                    <div className="aspect-video flex items-center justify-center bg-black/40 text-sm text-red-400">Falló · créditos reembolsados</div>
+                    <div className="aspect-video flex flex-col items-center justify-center gap-2 p-4 bg-black/40 text-sm text-red-400"><span>{v.error_message || "No se pudo completar el vídeo."}</span>{v.credits_refunded && <span className="text-xs text-slate-400">Créditos de la app reembolsados</span>}</div>
                   ) : (
                     <video src={fileUrl(v.storage_path)} controls playsInline
                       className={v.format === "reel" ? "w-full max-h-[420px] bg-black object-contain" : "w-full aspect-video bg-black object-contain"} />

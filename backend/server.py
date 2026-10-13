@@ -1145,6 +1145,9 @@ def _video_public(v: dict) -> dict:
         "photo_count": v.get("photo_count", 0),
         "eta_seconds": v.get("eta_seconds"),
         "created_at": v.get("created_at"),
+        "error_code": v.get("error_code"),
+        "error_message": v.get("error_message"),
+        "credits_refunded": bool(v.get("credits_refunded")),
     }
 
 
@@ -1159,6 +1162,7 @@ async def _process_video(video_id, user_id, items, fmt, title, subtitle, music, 
                 logo_bytes = None
         local_items = []
         for i, it in enumerate(items):
+            await db.videos.update_one({"id": video_id, "status": "processing"}, {"$set": {"heartbeat_at": datetime.now(timezone.utc).isoformat()}})
             data, _ = await asyncio.to_thread(storage.get_object, it["path"])
             if logo_bytes:
                 try:
@@ -1190,16 +1194,23 @@ async def _process_video(video_id, user_id, items, fmt, title, subtitle, music, 
         path = f"{storage.APP_NAME}/videos/{user_id}/{uuid.uuid4()}.mp4"
         stored = await asyncio.to_thread(storage.put_object, path, vbytes, "video/mp4")
         await db.videos.update_one(
-            {"id": video_id},
+            {"id": video_id, "status": "processing"},
             {"$set": {"status": "done", "storage_path": stored["path"],
                       "finished_at": datetime.now(timezone.utc).isoformat()}},
         )
         await log_usage(user_id, "video", fmt, VIDEO_COSTS.get(fmt, 0), 0, engine[0].get("name","KRAI") if engine else "ffmpeg", engine[1] if engine else None, ai_calls=len(local_items) if engine else 0)
-    except Exception:
+    except Exception as exc:
         logger.exception("video generation failed")
-        if cost > 0:
+        safe_error = isinstance(exc, ai_providers.ProviderRequestError)
+        claimed = await db.videos.update_one(
+            {"id": video_id, "status": "processing"},
+            {"$set": {"status": "failed",
+                      "error_code": exc.code if safe_error else "video_failed",
+                      "error_message": str(exc) if safe_error else "No se pudo terminar el vídeo.",
+                      "credits_refunded": cost > 0,
+                      "finished_at": datetime.now(timezone.utc).isoformat()}})
+        if claimed.modified_count and cost > 0:
             await db.users.update_one({"user_id": user_id}, {"$inc": {"credits": cost}})
-        await db.videos.update_one({"id": video_id}, {"$set": {"status": "failed"}})
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -1246,8 +1257,10 @@ async def create_video(property_id: str, data: VideoInput, user: dict = Depends(
         engine=await get_tool_override("video")
     except ProviderEditError as e:
         raise HTTPException(e.status_code,e.reason)
-    if engine and not ai_providers.is_krai_gateway(engine[0].get("base_url")):
-        raise HTTPException(400,"Selecciona KRAI para generar vídeo con IA")
+    if engine:
+        from video_provider import supports_video
+        if not supports_video(*engine):
+            raise HTTPException(400, "Este modelo no está conectado para convertir fotos en vídeo. Selecciona Gemini, Flow o NVIDIA Cosmos3 Nano.")
     cost = 0 if is_owner(user) else VIDEO_COSTS[fmt]
     if cost > 0:
         fresh = await db.users.find_one({"user_id": user["user_id"]})
@@ -1433,11 +1446,11 @@ async def _video_sweeper():
             await asyncio.sleep(120)
             cutoff = (datetime.now(timezone.utc) - timedelta(minutes=8)).isoformat()
             stuck = await db.videos.find(
-                {"status": "processing", "created_at": {"$lt": cutoff}}, {"_id": 0}
+                {"status": "processing", "$or": [{"heartbeat_at": {"$lt": cutoff}}, {"heartbeat_at": {"$exists": False}, "created_at": {"$lt": cutoff}}]}, {"_id": 0}
             ).to_list(100)
             for v in stuck:
                 r = await db.videos.update_one(
-                    {"id": v["id"], "status": "processing"}, {"$set": {"status": "failed"}}
+                    {"id": v["id"], "status": "processing", "heartbeat_at": v.get("heartbeat_at")}, {"$set": {"status": "failed", "error_code": "video_inactive", "error_message": "El proceso de vídeo dejó de responder.", "credits_refunded": bool(v.get("cost"))}}
                 )
                 if r.modified_count and v.get("cost"):
                     await db.users.update_one({"user_id": v["user_id"]}, {"$inc": {"credits": v["cost"]}})

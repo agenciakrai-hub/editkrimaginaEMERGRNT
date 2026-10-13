@@ -289,7 +289,9 @@ def register_admin_routes(api, db, current_user, action_catalog):
                 if caps.get("image_edit") or man.get("photo"):
                     photo_models.append(entry)
                 if caps.get("video") or man.get("video"):
-                    video_models.append(dict(entry))
+                    from video_provider import supports_video
+                    if supports_video(p, m["id"]):
+                        video_models.append(dict(entry))
         # Free local tools run on-device and cannot be routed to a provider, so they
         # are not listed. Every AI tool (incl. Mejora Pro / Perspectiva Pro) IS listed.
         _fixed = {"auto", "light", "sky", "straighten"}
@@ -316,6 +318,10 @@ def register_admin_routes(api, db, current_user, action_catalog):
             if not model:
                 raise HTTPException(status_code=400, detail="Modelo no encontrado en el proveedor")
             caps = ai_providers._ensure_caps(model)
+            if data.action == "video":
+                from video_provider import supports_video
+                if not supports_video(provider, data.model_id):
+                    raise HTTPException(400, "Este modelo no está conectado para convertir fotos en vídeo.")
             capability = "video" if data.action == "video" else "image_edit"
             manual = provider.get("enabled", {}).get(data.model_id, {}).get("video" if data.action == "video" else "photo")
             if not (caps.get(capability) or manual):
