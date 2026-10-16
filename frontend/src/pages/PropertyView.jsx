@@ -73,6 +73,7 @@ export default function PropertyView() {
   const [batchAction, setBatchAction] = useState("");
   const [job, setJob] = useState(null);
   const [lastBatch, setLastBatch] = useState(null);
+  const [preparingRemaining, setPreparingRemaining] = useState(false);
   const batchWatch = useRef(null);
   const batchKey = `krimagina:batch:${id}`;
 
@@ -260,6 +261,20 @@ export default function PropertyView() {
     }
   };
 
+  const prepareRemaining = async () => {
+    if (!lastBatch || job || preparingRemaining) return;
+    setPreparingRemaining(true);
+    try {
+      const { data } = await api.get(`/jobs/${lastBatch.id}/remaining`);
+      if (!data.photo_ids.length) { toast.success("Este lote ya no tiene fotos pendientes."); return; }
+      setSelectedIds(data.photo_ids);
+      setBatchAction(data.action);
+      setBatchOpen(true);
+      toast.info(`${data.photo_ids.length} fotos por completar. Las ya terminadas quedan fuera.`);
+    } catch (err) { toast.error(apiError(err)); }
+    finally { setPreparingRemaining(false); }
+  };
+
   const applyAutoAll = async () => {
     if (!selectedPhotos.length || job) return;
     try {
@@ -409,6 +424,8 @@ export default function PropertyView() {
             <p className="font-semibold text-white">Último lote · {lastBatch.label}</p>
             <p className="text-slate-300">{lastBatch.done || 0} editadas · {lastBatch.failed || 0} fallidas · {Math.max(0, lastBatch.total - (lastBatch.done || 0) - (lastBatch.failed || 0))} pendientes · {lastBatch.total} seleccionadas</p>
             {lastBatch.error_message && <p className="mt-2 text-amber-200">{lastBatch.error_message}</p>}
+            {(lastBatch.failed > 0 || lastBatch.done < lastBatch.total) && <Button onClick={prepareRemaining} disabled={preparingRemaining || photosProcessing} className="mt-3" data-testid="batch-remaining-btn">{preparingRemaining ? "Preparando…" : "Continuar fotos pendientes"}</Button>}
+
             {!!lastBatch.skipped && <p className="mt-1 text-slate-400">{lastBatch.skipped} fotos quedaron sin procesar después de detenerse el proveedor.</p>}
           </div>
         )}

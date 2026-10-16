@@ -337,13 +337,21 @@ def _check_edit_response(response):
     code = ""
     try:
         payload = response.json()
-        error = payload.get("error") if isinstance(payload, dict) else None
-        if isinstance(error, dict):
-            code = str(error.get("code") or error.get("type") or "").lower()
-        elif isinstance(error, str):
-            code = error.lower()
+        if isinstance(payload, dict):
+            error = payload.get("detail") or payload.get("error") or payload
+            if isinstance(error, dict):
+                code = str(error.get("code") or error.get("error_code") or error.get("type") or "").lower()
     except (ValueError, TypeError):
         pass
+    safe_errors = {
+        "session_unavailable": ("provider_session", "La sesión de ChatGPT no está disponible. Revisa su sesión en KRAI."),
+        "upstream_error": ("provider_browser", "El navegador de ChatGPT no pudo completar la edición. Se conserva el avance guardado."),
+        "unchanged_image": ("unchanged_image", "ChatGPT devolvió la imagen original sin editar. No se ha aplicado como resultado."),
+        "no_image": ("no_image", "ChatGPT terminó sin devolver una imagen válida."),
+    }
+    if code in safe_errors:
+        mapped, message = safe_errors[code]
+        raise ProviderRequestError(mapped, 503, message)
     if status == 409:
         raise ProviderRequestError("provider_busy", 409, "El proveedor está ocupado. Espera a que termine la edición en curso.")
     if status == 422:
@@ -359,7 +367,7 @@ def _check_edit_response(response):
         raise ProviderRequestError("provider_auth", 503,
             "KRAI no pudo autenticar esta aplicación. Revisa la conexión del proveedor.")
     raise ProviderRequestError("provider_unavailable", 503,
-        "El servicio de edición no respondió correctamente. Inténtalo más tarde.")
+        f"El servicio de edición respondió HTTP {status}. Se conserva el avance; comprueba su estado antes de continuar.")
 
 
 def _krai_edit(base_url, api_key, model_id, image_bytes, prompt):
@@ -383,6 +391,9 @@ def _krai_edit(base_url, api_key, model_id, image_bytes, prompt):
                 timeout=(10, 119))
         except requests.Timeout as exc:
             raise ProviderRequestError("provider_timeout", 504, "Tiempo de edición agotado. Comprueba el estado antes de repetir.") from exc
+        if response.status_code == 429 and attempt < 2:
+            time.sleep(30 if attempt == 0 else 60)
+            continue
         if response.status_code != 409 or attempt == 6:
             break
         time.sleep(5)

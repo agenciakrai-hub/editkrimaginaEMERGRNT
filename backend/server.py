@@ -654,16 +654,34 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
         prov, model_id = override
         prompt = ai_edit.build_prompt(action_key, options)
         try:
-            result_bytes = await asyncio.to_thread(ai_providers.run_image_edit, prov, model_id, data, prompt)
-            ai_calls = 1
+            import hashlib
+            stage_key = hashlib.sha256((str(prov.get("id")) + model_id + prompt).encode()).hexdigest()
+            stage = photo.get("edit_stage") or {}
+            if action_key in {"auto_pro", "complete"} and stage.get("source_path") == src_path and stage.get("key") == stage_key and stage.get("path"):
+                result_bytes, _ = await asyncio.to_thread(storage.get_object, stage["path"])
+            else:
+                result_bytes = await asyncio.to_thread(ai_providers.run_image_edit, prov, model_id, data, prompt)
+                ai_calls = 1
+                if action_key in {"auto_pro", "complete"} and result_bytes:
+                    ai_edit._validate_complete_result(data, result_bytes)
+                    stage_path = f"{storage.APP_NAME}/edits/{photo['user_id']}/{uuid.uuid4()}.stage"
+                    first_pass = await asyncio.to_thread(storage.put_object, stage_path, result_bytes, ai_providers.image_mime(result_bytes))
+                    stage_query = {"id": photo["id"], "user_id": photo["user_id"], "current_path": photo.get("current_path"), "is_deleted": {"$ne": True}}
+                    if photo.get("edit_job_id"):
+                        stage_query.update(edit_job_id=photo["edit_job_id"], status="processing")
+                    saved_stage = await db.photos.update_one(stage_query, {"$set": {"edit_stage": {"source_path": src_path, "key": stage_key, "path": first_pass["path"]}}})
+                    if not saved_stage.matched_count:
+                        raise ProviderEditError(provider="KRAI", model=model_id, reason="La foto cambió; se ha detenido sin sobrescribirla.", code="edit_cancelled", status_code=409)
             if action_key in {"auto_pro", "complete"} and result_bytes:
                 ai_edit._validate_complete_result(data, result_bytes)
                 result_bytes = await asyncio.to_thread(ai_providers.run_image_edit, prov, model_id, result_bytes, ai_edit.PERSPECTIVE_ONLY_PROMPT)
-                ai_calls = 2
+                ai_calls += 1
             used_provider = prov.get("name") or prov.get("type")
             used_model = model_id
             gemini_calls = 0
         except Exception as e:
+            if isinstance(e, ProviderEditError):
+                raise
             # An explicit provider override must never silently fall back to the
             # Emergent/Gemini engine. A silent fallback can surface an unrelated
             # "credits" error even though the configured provider is the one the
@@ -718,6 +736,7 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
             "$set": {"current_path": stored["path"], "status": "ready",
                      "disclosure": bool(photo.get("disclosure", False) or disc)},
             "$push": {"edits": edit_entry},
+            "$unset": {"edit_stage": ""},
         },
     )
     if not saved.modified_count:
@@ -1019,7 +1038,7 @@ async def _process_batch(job_id: str, user_id: str, photo_ids: List[str], action
                 await db.jobs.update_one({"id": job_id}, {"$set": {"current_photo_id": pid}})
                 await _apply_edit(photo, action_key, options, disclosure)
                 await settle_batch_photo(db, job, pid)
-                await db.jobs.update_one({"id": job_id, "status": "processing"}, {"$inc": {"done": 1, "processed": 1}})
+                await db.jobs.update_one({"id": job_id, "status": "processing"}, {"$inc": {"done": 1, "processed": 1}, "$addToSet": {"completed_photo_ids": pid}})
             except Exception as exc:
                 logger.exception("batch item failed %s", pid)
                 code = exc.code if isinstance(exc, ProviderEditError) else "batch_item_failed"
@@ -1027,7 +1046,7 @@ async def _process_batch(job_id: str, user_id: str, photo_ids: List[str], action
                 await settle_batch_photo(db, job, pid, refund=True)
                 await db.jobs.update_one({"id": job_id, "status": "processing"}, {"$inc": {"failed": 1, "processed": 1}, "$set": {"error_code": code, "error_message": message}, "$addToSet": {"failed_photo_ids": pid}})
                 # Stop sending more photographs into an unhealthy provider.
-                if code in {"rate_limited", "provider_timeout", "provider_unavailable", "provider_busy", "provider_auth"}:
+                if code in {"rate_limited", "provider_timeout", "provider_unavailable", "provider_busy", "provider_auth", "provider_session", "provider_browser", "no_image", "unchanged_image"}:
                     break
             finally:
                 await db.photos.update_one({"id": pid, "user_id": user_id, "edit_job_id": job_id}, {"$set": {"status": "ready", "edit_job_id": None}})
@@ -1069,6 +1088,7 @@ async def batch_edit(property_id: str, data: BatchInput, user: dict = Depends(cu
     job = {"id": job_id, "kind": "batch_edit", "user_id": user["user_id"], "property_id": property_id,
            "action": data.action, "label": ai_edit.ACTIONS[data.action]["label"], "total": len(photos),
            "processed": 0, "done": 0, "failed": 0, "status": "starting", "unit_cost": unit_cost,
+           "options": data.options, "disclosure": data.disclosure,
            "created_at": datetime.now(timezone.utc).isoformat(), "heartbeat_at": datetime.now(timezone.utc).isoformat(), "photo_ids": photo_ids}
     try:
         await db.jobs.insert_one(job)
@@ -1087,6 +1107,20 @@ async def batch_edit(property_id: str, data: BatchInput, user: dict = Depends(cu
         await db.jobs.update_one({"id": job_id}, {"$set": {"status": "failed", "error_message": "No se pudo iniciar el lote. No hay fotos reservadas por este intento."}})
         raise
     return {"job_id": job_id, "total": len(photos), "cost": total_cost}
+
+
+@api.get("/jobs/{job_id}/remaining")
+async def batch_remaining(job_id: str, user: dict = Depends(current_user)):
+    job = await db.jobs.find_one({"id": job_id, "user_id": user["user_id"], "kind": "batch_edit"}, {"_id": 0})
+    if not job:
+        raise HTTPException(404, "Lote no encontrado")
+    if job.get("status") in {"starting", "processing"}:
+        raise HTTPException(409, "El lote todavía está procesando")
+    photos = await db.photos.find({"property_id": job["property_id"], "user_id": user["user_id"], "id": {"$in": job.get("photo_ids", [])}, "is_deleted": {"$ne": True}}, {"_id": 0, "id": 1, "edits": 1, "status": 1}).to_list(1000)
+    completed = set(job.get("completed_photo_ids", []))
+    completed.update(p["id"] for p in photos if any(e.get("job_id") == job_id for e in p.get("edits", [])))
+    remaining = [p["id"] for p in photos if p["id"] not in completed]
+    return {"photo_ids": remaining, "action": job["action"], "options": job.get("options", {}), "disclosure": job.get("disclosure"), "completed": len(completed)}
 
 
 @api.post("/properties/{property_id}/clear-failed-processes")
