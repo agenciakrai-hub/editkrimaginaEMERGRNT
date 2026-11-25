@@ -15,7 +15,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { motion } from "framer-motion";
-import { Plus, Home, Images, Loader2, Trash2, MapPin, SlidersHorizontal, Layers } from "lucide-react";
+import { Plus, Home, Images, Loader2, Trash2, MapPin, SlidersHorizontal, Layers, Compass } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Dashboard() {
@@ -104,9 +104,10 @@ export default function Dashboard() {
           </Dialog>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8" data-testid="studio-tools">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8" data-testid="studio-tools">
           <button onClick={() => navigate("/app/manual")} data-testid="manual-tool" className="p-5 rounded-2xl border border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 text-left"><SlidersHorizontal className="w-6 h-6 text-violet-300 mb-3" /><h2 className="font-display text-lg font-semibold text-white">Edición manual</h2><p className="text-sm text-slate-400 mt-1">Luz, color, capas, máscaras, recorte y perspectiva.</p></button>
           <button onClick={() => navigate("/app/hdr")} data-testid="hdr-tool" className="p-5 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-left"><Layers className="w-6 h-6 text-cyan-300 mb-3" /><h2 className="font-display text-lg font-semibold text-white">Fusión HDR</h2><p className="text-sm text-slate-400 mt-1">Combina varias exposiciones y guarda el resultado en tu propiedad.</p></button>
+          <button onClick={() => navigate("/app/tour")} className="p-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-left"><Compass className="w-6 h-6 text-emerald-300 mb-3" /><h2 className="font-display text-lg font-semibold text-white">Tour virtual</h2><p className="text-sm text-slate-400 mt-1">Monta y revisa un recorrido interactivo con tus fotos 360°.</p></button>
         </div>
 
         {properties === null ? (

@@ -9,6 +9,7 @@ import Register from "@/pages/Register";
 import AuthCallback from "@/pages/AuthCallback";
 import ManualEditor from "@/pages/ManualEditor";
 import HdrFusion from "@/pages/HdrFusion";
+import VirtualTour from "@/pages/VirtualTour";
 import Dashboard from "@/pages/Dashboard";
 import PropertyView from "@/pages/PropertyView";
 import Editor from "@/pages/Editor";
@@ -26,6 +27,7 @@ function AppRouter() {
     <Routes>
       <Route path="/app/manual" element={<ProtectedRoute><ManualEditor /></ProtectedRoute>} />
       <Route path="/app/hdr" element={<ProtectedRoute><HdrFusion /></ProtectedRoute>} />
+      <Route path="/app/tour" element={<ProtectedRoute><VirtualTour /></ProtectedRoute>} />
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />

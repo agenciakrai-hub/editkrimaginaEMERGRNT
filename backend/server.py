@@ -26,6 +26,7 @@ import video as video_gen
 import payments as pay
 import providers as ai_providers
 from admin import register_admin_routes
+from tour import register_tour_routes
 import stripe
 import tempfile
 from work_heartbeat import stale_work_filter, run_with_heartbeat, batch_public
@@ -1450,6 +1451,8 @@ register_admin_routes(api, db, current_user, ai_edit.ACTIONS)
 
 from studio_tools import register_studio_routes
 register_studio_routes(api, db, current_user, get_tool_override, is_owner, log_usage)
+
+register_tour_routes(api, current_user)
 
 app.include_router(api)
 
