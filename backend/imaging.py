@@ -25,8 +25,6 @@ STANDARD_EXTS = {"jpg", "jpeg", "png", "webp"}
 HEIC_EXTS = {"heic", "heif"}
 RAW_EXTS = {"cr2", "cr3", "nef", "arw", "dng", "raf", "orf", "rw2", "pef", "srw", "sr2", "raw"}
 
-MAX_DIM = 2560
-
 
 def is_supported_input(ext: str) -> bool:
     return ext in STANDARD_EXTS or ext in HEIC_EXTS or ext in RAW_EXTS
@@ -36,16 +34,12 @@ def needs_conversion(ext: str) -> bool:
     return ext in HEIC_EXTS or ext in RAW_EXTS
 
 
-def _downscale_and_encode(img: "Image.Image") -> bytes:
+def _encode_full_resolution(img: "Image.Image") -> bytes:
+    """Convert HEIC/RAW to JPEG without discarding source pixels."""
     if img.mode != "RGB":
         img = img.convert("RGB")
-    w, h = img.size
-    longest = max(w, h)
-    if longest > MAX_DIM:
-        scale = MAX_DIM / longest
-        img = img.resize((round(w * scale), round(h * scale)), Image.LANCZOS)
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=90, optimize=True)
+    img.save(buf, format="JPEG", quality=95, subsampling=0, optimize=True)
     return buf.getvalue()
 
 
@@ -120,11 +114,11 @@ def convert_to_jpeg(data: bytes, ext: str) -> bytes:
         if not HEIF_OK:
             raise RuntimeError("conversión HEIC no disponible")
         img = Image.open(io.BytesIO(data))
-        return _downscale_and_encode(img)
+        return _encode_full_resolution(img)
     if ext in RAW_EXTS:
         if not RAW_OK:
             raise RuntimeError("conversión RAW no disponible")
         with rawpy.imread(io.BytesIO(data)) as raw:
             rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=False, output_bps=8)
-        return _downscale_and_encode(Image.fromarray(rgb))
+        return _encode_full_resolution(Image.fromarray(rgb))
     raise RuntimeError("formato no convertible")
