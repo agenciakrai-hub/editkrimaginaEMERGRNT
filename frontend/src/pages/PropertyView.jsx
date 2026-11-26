@@ -125,41 +125,7 @@ export default function PropertyView() {
     }
   }, [id]);
 
-  const MAX_DIM = 2560;
-
-  // Downscale/re-encode large images in the browser so each upload stays small (avoids 413).
-  const optimizeImage = (file) =>
-    new Promise((resolve) => {
-      if (!file.type?.startsWith("image/")) return resolve(file);
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        const longest = Math.max(img.width, img.height);
-        if (longest <= MAX_DIM && file.size < 3.5 * 1024 * 1024) return resolve(file);
-        const scale = Math.min(1, MAX_DIM / longest);
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) return resolve(file);
-            const name = file.name.replace(/\.(png|webp|jpeg)$/i, ".jpg");
-            resolve(new File([blob], name.match(/\.jpg$/i) ? name : name + ".jpg", { type: "image/jpeg" }));
-          },
-          "image/jpeg",
-          0.9
-        );
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(file);
-      };
-      img.src = url;
-    });
+  // Preserve the uploaded original. Resizing here permanently removes detail before storage.
 
   const handleFiles = async (files) => {
     if (!files?.length) return;
@@ -168,7 +134,7 @@ export default function PropertyView() {
     let ok = 0;
     for (const f of arr) {
       try {
-        const processed = await optimizeImage(f);
+        const processed = f;
         const form = new FormData();
         form.append("files", processed, processed.name);
         const { data } = await api.post(`/properties/${id}/photos`, form, {
