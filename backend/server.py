@@ -718,7 +718,8 @@ async def _apply_edit(photo: dict, action_key: str, options: dict, disclosure: O
                 reason="KRAI devolvió una imagen con formato o proporciones incompatibles. No se ha guardado la edición.",
                 code="invalid_image_geometry", status_code=502) from exc
     preserve_original = bool(override and ai_providers.is_krai_gateway(override[0].get("base_url")))
-    if not is_local and not preserve_original:
+    if not is_local:
+        # Normalize every remote provider result, including KRAI, to the source dimensions.
         result_bytes = await asyncio.to_thread(imaging.finalize_edit, result_bytes, data)
     output_mime = ai_providers.image_mime(result_bytes) if preserve_original else "image/jpeg"
     output_ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[output_mime]
